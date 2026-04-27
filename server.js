@@ -1,8 +1,9 @@
-require("dotenv").config();
+import dotenv from "dotenv";
+import express from "express";
+import cors from "cors";
+import OpenAI from "openai";
 
-const express = require("express");
-const cors = require("cors");
-const OpenAI = require("openai");
+dotenv.config();
 
 const app = express();
 
@@ -100,7 +101,6 @@ ${trimmedJD}
     const text = completion.choices[0].message.content.trim();
     const parsed = JSON.parse(text);
 
-    // Force company name and STAR answer count after AI response
     parsed.companyName = providedCompany;
     parsed.starAnswers = Array.isArray(parsed.starAnswers)
       ? parsed.starAnswers.slice(0, 3)
@@ -119,6 +119,6 @@ ${trimmedJD}
 
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`AskScoobyAI API running on port ${PORT}`);
 });
