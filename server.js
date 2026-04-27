@@ -25,13 +25,16 @@ app.post("/generate", async (req, res) => {
 
     const trimmedCV = cv.slice(0, 5000);
     const trimmedJD = jd.slice(0, 7000);
+    const providedCompany = company && company.trim()
+      ? company.trim()
+      : "Company not provided";
 
     const prompt = `
 You are AskScoobyAI, an expert interview preparation assistant.
 
-Return ONLY valid JSON. Do not include markdown or code fences.
+Return ONLY valid JSON. Do not include markdown, explanations, or code fences.
 
-Use this exact structure:
+Use this exact JSON structure:
 {
   "jobTitle": "string",
   "companyName": "string",
@@ -56,22 +59,23 @@ Use this exact structure:
 }
 
 Rules:
+- Use this exact company name: ${providedCompany}
+- The companyName field must be: ${providedCompany}
 - Generate exactly 10 interviewQuestions.
 - Each answer should be 4-8 lines, approximately 70-110 words.
 - Each answer must be written in the first person.
 - Each answer should end with a natural confident closing sentence.
 - Generate exactly 5 questionsForInterviewer.
 - Generate exactly 3 STAR answers.
-- The "starAnswers" array must contain exactly 3 objects.
+- The starAnswers array must contain exactly 3 objects. Do not return 4 or 5.
 - Each STAR answer should be detailed but concise, around 140-190 words in total.
 - Generate exactly 5 cvImprovementPreview bullet points.
 - Cover letter should be concise, around 120-160 words.
 - Do not invent employers, dates, qualifications, certifications, figures, or achievements.
 - If evidence is missing from the CV, phrase carefully instead of inventing.
-- If company is missing, use "Company not provided".
 
 Company:
-${company || "Company not provided"}
+${providedCompany}
 
 CV:
 ${trimmedCV}
@@ -89,12 +93,18 @@ ${trimmedJD}
           content: prompt
         }
       ],
-      temperature: 0.4,
-      max_tokens: 3500
+      temperature: 0.3,
+      max_tokens: 3200
     });
 
     const text = completion.choices[0].message.content.trim();
     const parsed = JSON.parse(text);
+
+    // Force company name and STAR answer count after AI response
+    parsed.companyName = providedCompany;
+    parsed.starAnswers = Array.isArray(parsed.starAnswers)
+      ? parsed.starAnswers.slice(0, 3)
+      : [];
 
     res.json(parsed);
 
