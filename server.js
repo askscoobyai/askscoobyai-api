@@ -80,7 +80,16 @@ Rules:
 - Each answer should be 4-8 lines, approximately 70-110 words.
 - Each answer must be written in the first person.
 - Each answer should reference the candidate's CV where possible.
-- Each answer should end with a natural confident closing sentence.
+- Every interview answer must end with one short, natural closing line.
+- The closing line must be relevant to the answer and role.
+- Use a different closing line for each answer.
+- Closing lines should sound similar in style to:
+  "That’s how I approached it in that scenario."
+  "That worked well in practice."
+  "That’s been my experience so far."
+  "I’d apply the same approach here as well."
+  "That’s something I’d look to bring into this role."
+- Do not reuse the same closing line across multiple answers.
 - Generate exactly 5 questionsForInterviewer.
 - Questions for the interviewer should be thoughtful and relevant.
 - Do not invent employers, dates, qualifications, certifications, figures, or achievements.
