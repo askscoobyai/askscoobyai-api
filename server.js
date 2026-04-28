@@ -25,6 +25,25 @@ function getCompany(company) {
     return company && company.trim() ? company.trim() : "";
 }
 
+/**
+ * 🔒 CRITICAL VALIDATION FUNCTION
+ */
+function isMeaningfulText(text, minLength = 150) {
+    if (!text) return false;
+
+    const cleaned = text.trim();
+
+    if (cleaned.length < minLength) return false;
+
+    const words = cleaned.split(/\s+/);
+    if (words.length < 20) return false;
+
+    const uniqueChars = new Set(cleaned.toLowerCase());
+    if (uniqueChars.size < 10) return false;
+
+    return true;
+}
+
 async function callOpenAI(prompt, maxTokens = 2500) {
     const completion = await openai.chat.completions.create({
         model: "gpt-4o-mini",
@@ -42,13 +61,19 @@ async function callOpenAI(prompt, maxTokens = 2500) {
     return JSON.parse(completion.choices[0].message.content.trim());
 }
 
+/**
+ * =========================
+ * INTERVIEW
+ * =========================
+ */
 app.post("/generate-interview", async (req, res) => {
     try {
         const { cv, jd, company } = req.body;
 
-        if (!cv || !jd) {
+        // 🔒 VALIDATION
+        if (!isMeaningfulText(cv, 150) || !isMeaningfulText(jd, 200)) {
             return res.status(400).json({
-                error: "Missing CV or Job Description."
+                error: "Input too short or not meaningful. Please provide a valid CV and job description."
             });
         }
 
@@ -120,13 +145,19 @@ ${trimmedJD}
     }
 });
 
+/**
+ * =========================
+ * STAR
+ * =========================
+ */
 app.post("/generate-star", async (req, res) => {
     try {
         const { cv, jd, company } = req.body;
 
-        if (!cv || !jd) {
+        // 🔒 VALIDATION
+        if (!isMeaningfulText(cv, 150) || !isMeaningfulText(jd, 200)) {
             return res.status(400).json({
-                error: "Missing CV or Job Description."
+                error: "Input too short or not meaningful. Please provide a valid CV and job description."
             });
         }
 
@@ -143,20 +174,19 @@ Company Info rules:
 - Do not mention the candidate in companyInfo.
 - Do not use phrases like "in your interview", "you can reference", "align your experience", "highlight", or "demonstrates".
 - Focus on what the company does, its sector, customers or stakeholders, products/services, mission, operating model, and relevant business priorities.
-- If the exact company cannot be confidently described from the company name and job description, say that detailed public company information is limited, then describe only what can be inferred from the job description.
+- If the exact company cannot be confidently described, say that detailed public company information is limited.
 `
             : `
 Company Info rules:
 - companyInfo must be an empty string.
 - Do not generate a company profile.
 - Do not mention that the company name was not provided.
-- Do not repeat any fallback message.
 `;
 
         const prompt = `
 You are AskScoobyAI, an expert interview preparation assistant.
 
-Return ONLY valid JSON. Do not include markdown or code fences.
+Return ONLY valid JSON.
 
 Use this exact JSON structure:
 {
@@ -175,14 +205,9 @@ Use this exact JSON structure:
 }
 
 Rules:
-- Extract the jobTitle from the job description.
 - Generate exactly 3 STAR answers.
-- The starAnswers array must contain exactly 3 objects.
-- Each STAR answer should be detailed but concise, around 140-190 words in total.
-- STAR examples must be based on the strongest relevant experience from the CV.
-- Do not invent employers, dates, qualifications, certifications, figures, or achievements.
-- If evidence is missing from the CV, phrase carefully instead of inventing.
-- companyName must be the exact company value provided, or an empty string if not provided.
+- Use real CV evidence where possible.
+- Do not invent details.
 
 ${companyInfoRules}
 
@@ -215,13 +240,19 @@ ${trimmedJD}
     }
 });
 
+/**
+ * =========================
+ * DOCS
+ * =========================
+ */
 app.post("/generate-docs", async (req, res) => {
     try {
         const { cv, jd, company } = req.body;
 
-        if (!cv || !jd) {
+        // 🔒 VALIDATION
+        if (!isMeaningfulText(cv, 150) || !isMeaningfulText(jd, 200)) {
             return res.status(400).json({
-                error: "Missing CV or Job Description."
+                error: "Input too short or not meaningful. Please provide a valid CV and job description."
             });
         }
 
@@ -231,9 +262,9 @@ app.post("/generate-docs", async (req, res) => {
         const prompt = `
 You are AskScoobyAI, an expert career assistant.
 
-Return ONLY valid JSON. Do not include markdown or code fences.
+Return ONLY valid JSON.
 
-Use this exact JSON structure:
+Use this structure:
 {
   "jobTitle": "string",
   "companyName": "string",
@@ -242,16 +273,9 @@ Use this exact JSON structure:
 }
 
 Rules:
-- Extract the jobTitle from the job description.
-- Generate one concise tailored cover letter.
-- Cover letter should be around 120-160 words.
-- Generate exactly 5 cvImprovementPreview bullet points.
-- CV improvement points must explain how the CV could better align with this job description.
-- Suggest practical improvements such as clearer achievements, stronger keywords, measurable outcomes, and role alignment.
-- Do not invent employers, dates, qualifications, certifications, figures, or achievements.
-- If company is provided, use it naturally in the cover letter.
-- If company is not provided, write the cover letter without naming a company.
-- companyName must be the exact company value provided, or an empty string if not provided.
+- Generate 1 tailored cover letter (120–160 words)
+- Generate exactly 5 CV improvement points
+- Do not invent achievements
 
 Company:
 ${providedCompany || "Not provided"}
