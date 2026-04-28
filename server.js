@@ -123,6 +123,26 @@ app.post("/generate-star", async (req, res) => {
 
         const { trimmedCV, trimmedJD } = trimInputs(cv, jd);
         const providedCompany = getCompany(company);
+        const hasCompany = providedCompany.length > 1;
+
+        const companyInfoRules = hasCompany
+            ? `
+Company Info rules:
+- Generate a factual companyInfo mini-profile of at least 6 sentences.
+- companyInfo must only describe the company itself.
+- Do not give interview advice in companyInfo.
+- Do not mention the candidate in companyInfo.
+- Do not use phrases like "in your interview", "you can reference", "align your experience", "highlight", or "demonstrates".
+- Focus on what the company does, its sector, customers or stakeholders, products/services, mission, operating model, and relevant business priorities.
+- If the exact company cannot be confidently described from the company name and job description, say that detailed public company information is limited, then describe only what can be inferred from the job description.
+`
+            : `
+Company Info rules:
+- companyInfo must be an empty string.
+- Do not generate a company profile.
+- Do not mention that the company name was not provided.
+- Do not repeat any fallback message.
+`;
 
         const prompt = `
 You are AskScoobyAI, an expert interview preparation assistant.
@@ -155,15 +175,7 @@ Rules:
 - If evidence is missing from the CV, phrase carefully instead of inventing.
 - companyName must be the exact company value provided, or an empty string if not provided.
 
-Company Info rules:
-- If company is provided, generate a factual companyInfo mini-profile of at least 6 sentences.
-- companyInfo must only describe the company itself.
-- Do not give interview advice in companyInfo.
-- Do not mention the candidate in companyInfo.
-- Do not use phrases like "in your interview", "you can reference", "align your experience", "highlight", or "demonstrates".
-- Focus on what the company does, its sector, customers or stakeholders, products/services, mission, operating model, and relevant business priorities.
-- If the exact company cannot be confidently described from the company name and job description, say that detailed public company information is limited, then describe only what can be inferred from the job description.
-- If company is not provided, companyInfo should say: "Company name was not provided. A company profile cannot be generated, but the STAR answers are still tailored to the role requirements and CV."
+${companyInfoRules}
 
 Company:
 ${providedCompany || "Not provided"}
@@ -178,7 +190,7 @@ ${trimmedJD}
         const parsed = await callOpenAI(prompt, 2600);
 
         parsed.companyName = providedCompany;
-        parsed.companyInfo = parsed.companyInfo || "";
+        parsed.companyInfo = hasCompany ? (parsed.companyInfo || "") : "";
         parsed.starAnswers = Array.isArray(parsed.starAnswers)
             ? parsed.starAnswers.slice(0, 3)
             : [];
