@@ -186,10 +186,43 @@ Use this exact JSON structure:
 Rules:
 - Extract the jobTitle from the job description.
 - Generate exactly 10 interviewQuestions.
-- Each question must be realistic for this specific job.
+- The questions must be ordered strategically.
+
+Question structure:
+1. Questions 1-3 should be CV-specific technical or experience-based questions.
+   - These should reference tools, systems, projects, responsibilities, or previous experience clearly mentioned in the CV.
+   - Example style: "Your CV mentions using Python at [Company/Role]. Can you talk me through how you used it day to day?"
+   - Only mention a company, role, tool, or project if it clearly appears in the CV.
+   - If the CV mentions a tool but not a company, phrase it generally, e.g. "Your CV mentions experience with dbt. How have you used it in your work?"
+2. Questions 4-7 should be technical/system-specific questions based on the job description.
+   - Identify the key tools, systems, platforms, software, databases, reporting tools, cloud services, programming languages, frameworks, methodologies, and technical skills in the job description.
+   - Prioritise the most prominent systems/tools based on frequency, requirements, responsibilities, and essential criteria.
+   - For highly technical roles, make these questions practical and technical.
+   - For less technical roles, make these questions role-specific and scenario-based.
+   - Do not limit yourself to SQL, Tableau, Power BI, or dbt. Adapt to whatever systems appear in the job description.
+   - Example topics:
+     - Tableau: live vs extract connections, performance optimisation, dashboard design.
+     - Power BI: DAX, relationships, parameters, Power Query, data modelling.
+     - SQL: joins, window functions, CTEs, query optimisation.
+     - dbt: models, tests, lineage, transformations.
+     - Cloud/data tools: pipelines, permissions, storage, orchestration, monitoring.
+     - CRM/ERP/reporting tools: workflows, data quality, reporting, user adoption.
+3. Questions 8-10 should be behavioural, stakeholder, communication, prioritisation, or role-fit questions.
+   - These should still relate to the role and job description.
+
+Technical question rules:
+- If the role is technical or systems-heavy, at least 5 of the 10 questions should be technical or system-specific.
+- The most prominent systems/tools in the job description should receive more questions.
+- Technical questions should test practical understanding, trade-offs, troubleshooting, and real workplace usage.
+- Avoid generic questions like "What is SQL?" unless the role is entry-level.
+- Do not invent tools, systems, employers, dates, certifications, figures, or achievements.
+
+Answer rules:
 - Each answer should be 4-8 lines, approximately 70-110 words.
 - Each answer must be written in the first person.
-- Each answer should reference the candidate's CV where possible.
+- For CV-specific questions, answer using the candidate's CV evidence where possible.
+- For JD technical questions, provide a clear explanation, a practical example, and how the candidate could apply it in the role.
+- If the CV does not provide enough evidence, phrase carefully and avoid pretending the candidate has done something.
 - Every interview answer must end with one short, natural closing line.
 - The closing line must be relevant to the answer and role.
 - Use a different closing line for each answer.
@@ -200,9 +233,10 @@ Rules:
   "I’d apply the same approach here as well."
   "That’s something I’d look to bring into this role."
 - Do not reuse the same closing line across multiple answers.
+
+Other rules:
 - Generate exactly 5 questionsForInterviewer.
 - Questions for the interviewer should be thoughtful and relevant.
-- Do not invent employers, dates, qualifications, certifications, figures, or achievements.
 - If company is provided, use it naturally.
 - If company is not provided, leave companyName as an empty string.
 
@@ -218,7 +252,7 @@ Job Description:
 ${trimmedJD}
 `;
 
-        const parsed = await callOpenAI(prompt, 2800);
+        const parsed = await callOpenAI(prompt, 3200);
         parsed.companyName = providedCompany;
 
         if (validation.weak) {
@@ -311,6 +345,26 @@ Rules:
 - If evidence is missing from the CV, phrase carefully instead of inventing.
 - companyName must be the exact company value provided, or an empty string if not provided.
 
+STAR answer focus:
+- For technical or systems-heavy roles, STAR answers should be technically oriented.
+- Identify the key systems, tools, platforms, software, databases, reporting tools, cloud services, programming languages, frameworks, methodologies, and technical responsibilities in the job description.
+- Prioritise STAR examples that show practical application of those systems or similar experience from the CV.
+- Good STAR themes include:
+  - improving a dashboard or report,
+  - writing or optimising SQL,
+  - building or improving a data pipeline,
+  - using BI tools such as Tableau or Power BI,
+  - using dbt or transformation workflows,
+  - improving data quality,
+  - automating a manual process,
+  - solving a technical issue,
+  - translating stakeholder requirements into technical outputs,
+  - using CRM, ERP, cloud, analytics, or operational systems.
+- Do not make the STAR answers generic unless the role itself is non-technical.
+- If the CV mentions relevant tools or systems, use those as the basis for the STAR answers.
+- If the job description mentions systems not found in the CV, do not pretend the candidate has used them. Instead, use transferable experience and careful wording.
+- Each STAR title should clearly show the technical or role-specific theme.
+
 ${weakInputInstruction}
 
 ${companyInfoRules}
@@ -325,7 +379,7 @@ Job Description:
 ${trimmedJD}
 `;
 
-        const parsed = await callOpenAI(prompt, 2600);
+        const parsed = await callOpenAI(prompt, 3000);
 
         parsed.companyName = providedCompany;
         parsed.companyInfo = hasCompany ? (parsed.companyInfo || "") : "";
@@ -389,12 +443,25 @@ Rules:
 - Generate one concise tailored cover letter.
 - Cover letter should be around 120-160 words.
 - Generate exactly 5 cvImprovementPreview bullet points.
-- CV improvement points must explain how the CV could better align with this job description.
-- Suggest practical improvements such as clearer achievements, stronger keywords, measurable outcomes, and role alignment.
 - Do not invent employers, dates, qualifications, certifications, figures, or achievements.
 - If company is provided, use it naturally in the cover letter.
 - If company is not provided, write the cover letter without naming a company.
 - companyName must be the exact company value provided, or an empty string if not provided.
+
+CV improvement rules:
+- Each CV improvement point must be specific and actionable.
+- Each point should identify which previous role, project, section, skill, or experience from the CV should be updated.
+- Each point should explain which job requirement it connects to.
+- Each point should say exactly what to add, clarify, or strengthen.
+- Where possible, include an example rewritten bullet.
+- Do not give generic advice like "add more metrics" unless you also specify where and how.
+- If the CV does not clearly show role names or company names, refer to the relevant experience more generally, e.g. "your analytics experience", "your dashboarding work", or "your Python project".
+- Prioritise technical systems, tools, platforms, reporting responsibilities, stakeholder requirements, and role-critical skills mentioned in the job description.
+- Make the advice practical enough that the user can copy it into their CV after editing.
+
+Expected style for cvImprovementPreview:
+- "Update your [specific role/experience/section] to better reflect [job requirement]. Add detail on [tool/process/impact]. Example rewrite: '[example bullet]'."
+- "In your [specific previous role/experience], strengthen the bullet about [activity] by mentioning [tool/system/stakeholder/outcome], because this role asks for [job requirement]."
 
 ${weakInputInstruction}
 
@@ -408,8 +475,14 @@ Job Description:
 ${trimmedJD}
 `;
 
-        const parsed = await callOpenAI(prompt, 1800);
+        const parsed = await callOpenAI(prompt, 2400);
         parsed.companyName = providedCompany;
+
+        if (Array.isArray(parsed.cvImprovementPreview)) {
+            parsed.cvImprovementPreview = parsed.cvImprovementPreview.slice(0, 5);
+        } else {
+            parsed.cvImprovementPreview = [];
+        }
 
         if (validation.weak) {
             parsed.inputNote = "Tip: Adding more CV or job description detail can improve personalisation.";
