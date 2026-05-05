@@ -274,6 +274,83 @@ function ensureInterviewQuestionStructure(parsed, hasCompany, companyName) {
     return parsed;
 }
 
+function buildFallbackStarAnswer(index) {
+    const answers = [
+        {
+            title: "Taking ownership of a role-relevant challenge",
+            situation: "In one of my previous roles or projects, I was involved in work that required me to understand a problem clearly and contribute to a practical solution.",
+            task: "My task was to use the information available, understand what mattered most, and support a reliable outcome without overcomplicating the work.",
+            action: "I broke the work into clear steps, checked the available information carefully, asked focused questions where needed, and made sure my contribution aligned with the wider objective.",
+            result: "The result was a more structured and dependable piece of work that supported the needs of the team or stakeholder. It also helped me strengthen the way I approach similar challenges.",
+            whatNotToSay: "Avoid making the example sound vague or claiming ownership of results that are not supported by the CV.",
+            stealThisPhrase: "I took ownership of clarifying the problem first, so the solution was focused on the right outcome."
+        },
+        {
+            title: "Improving a process or output",
+            situation: "In a previous role or project, I noticed an opportunity to improve the way a task, report, workflow, or process was being handled.",
+            task: "My task was to make the work more accurate, efficient, or easier to use while keeping the needs of the role or stakeholder in mind.",
+            action: "I reviewed the current approach, identified where errors or delays could occur, and made practical improvements based on the tools, data, or process available.",
+            result: "The improvement helped make the output clearer, more reliable, or easier to repeat. It also showed that I can look beyond completion and think about quality and long-term usefulness.",
+            whatNotToSay: "Do not imply that the previous process was poor because of other people. Focus on improvement, not blame.",
+            stealThisPhrase: "I improved the process by focusing on accuracy, repeatability, and the end user’s needs."
+        },
+        {
+            title: "Working with stakeholders or team members",
+            situation: "In a previous role or project, I worked with others to understand expectations, clarify requirements, or deliver something useful.",
+            task: "My task was to communicate clearly, understand what was needed, and make sure my work supported the wider objective.",
+            action: "I listened carefully, asked clarifying questions, kept communication practical, and translated the requirements into clear actions that I could follow through on.",
+            result: "This helped avoid misunderstandings and made the final output more aligned with what was needed. It also strengthened my ability to work effectively with different people.",
+            whatNotToSay: "Avoid saying stakeholders were difficult or unreasonable. Show how you handled communication professionally.",
+            stealThisPhrase: "I aligned stakeholders by clarifying expectations early and keeping communication focused on the outcome."
+        },
+        {
+            title: "Solving a technical or practical problem",
+            situation: "In one of my previous experiences, I faced a technical or practical issue that needed a structured approach rather than a quick guess.",
+            task: "My task was to understand the cause of the issue, identify possible solutions, and help move the work forward with minimal disruption.",
+            action: "I checked the issue step by step, reviewed the source information or process, tested assumptions, and used a logical approach to narrow down the root cause.",
+            result: "This helped resolve or reduce the issue and gave the team a clearer understanding of what had happened. It also reinforced the importance of careful troubleshooting.",
+            whatNotToSay: "Do not suggest that you guessed your way through the issue. Emphasise a calm and structured approach.",
+            stealThisPhrase: "I worked through the issue methodically, testing one assumption at a time until I found the root cause."
+        },
+        {
+            title: "Adapting and learning quickly",
+            situation: "In a previous role or project, I had to learn something new or adapt quickly to a new tool, process, requirement, or working environment.",
+            task: "My task was to get up to speed quickly while still delivering work to a good standard.",
+            action: "I focused on the most important parts first, used available resources, asked targeted questions, and applied what I learned directly to the task in front of me.",
+            result: "This helped me become productive more quickly and gave me confidence in handling unfamiliar situations. It also showed that I can learn fast while staying focused on quality.",
+            whatNotToSay: "Avoid saying you needed too much hand-holding. Show that you asked good questions and took responsibility for learning.",
+            stealThisPhrase: "I focused my learning on what would help me deliver value fastest."
+        }
+    ];
+
+    return answers[index] || answers[0];
+}
+
+function ensureStarAnswerStructure(parsed) {
+    if (!Array.isArray(parsed.starAnswers)) {
+        parsed.starAnswers = [];
+    }
+
+    parsed.starAnswers = parsed.starAnswers
+        .filter((item) => item && typeof item === "object")
+        .map((item, index) => ({
+            title: cleanText(item.title) || buildFallbackStarAnswer(index).title,
+            situation: cleanText(item.situation) || buildFallbackStarAnswer(index).situation,
+            task: cleanText(item.task) || buildFallbackStarAnswer(index).task,
+            action: cleanText(item.action) || buildFallbackStarAnswer(index).action,
+            result: cleanText(item.result) || buildFallbackStarAnswer(index).result,
+            whatNotToSay: cleanText(item.whatNotToSay) || buildFallbackStarAnswer(index).whatNotToSay,
+            stealThisPhrase: cleanText(item.stealThisPhrase) || buildFallbackStarAnswer(index).stealThisPhrase
+        }))
+        .slice(0, 5);
+
+    while (parsed.starAnswers.length < 5) {
+        parsed.starAnswers.push(buildFallbackStarAnswer(parsed.starAnswers.length));
+    }
+
+    return parsed;
+}
+
 app.post("/generate-interview", async (req, res) => {
     try {
         const { cv, jd, company } = req.body;
@@ -470,7 +547,7 @@ app.post("/generate-star", async (req, res) => {
 Input detail note:
 - The CV or job description is brief. Be extra careful not to invent details.
 - STAR answers should stay grounded in what the CV actually says.
-- If evidence is limited, phrase carefully using wording like "I would approach this by..." rather than inventing past achievements.
+- If evidence is limited, use careful wording such as "I would approach this by..." or "In a similar situation..." rather than inventing past achievements.
 `
             : "";
 
@@ -494,7 +571,7 @@ Company Info rules:
 `;
 
         const prompt = `
-You are AskScoobyAI, an expert interview preparation assistant.
+You are AskScoobyAI, an expert interview preparation and STAR answer coaching assistant.
 
 Return ONLY valid JSON. Do not include markdown or code fences.
 
@@ -509,40 +586,99 @@ Use this exact JSON structure:
       "situation": "string",
       "task": "string",
       "action": "string",
-      "result": "string"
+      "result": "string",
+      "whatNotToSay": "string",
+      "stealThisPhrase": "string"
     }
   ]
 }
 
 Rules:
 - Extract the jobTitle from the job description.
-- Generate exactly 3 STAR answers.
-- The starAnswers array must contain exactly 3 objects.
-- Each STAR answer should be detailed but concise, around 140-190 words in total.
-- STAR examples must be based on the strongest relevant experience from the CV.
-- Do not invent employers, dates, qualifications, certifications, figures, or achievements.
-- If evidence is missing from the CV, phrase carefully instead of inventing.
+- Generate exactly 5 STAR answers.
+- The starAnswers array must contain exactly 5 objects.
+- Each STAR answer should be detailed but concise, around 150-210 words across situation, task, action, and result.
 - companyName must be the exact company value provided, or an empty string if not provided.
+- Do not invent employers, dates, qualifications, certifications, figures, achievements, tools, systems, or metrics.
+- If evidence is missing from the CV, phrase carefully instead of inventing.
 
-STAR answer focus:
-- For technical or systems-heavy roles, STAR answers should be technically oriented.
-- Identify the key systems, tools, platforms, software, databases, reporting tools, cloud services, programming languages, frameworks, methodologies, and technical responsibilities in the job description.
-- Prioritise STAR examples that show practical application of those systems or similar experience from the CV.
-- Good STAR themes include:
-  - improving a dashboard or report,
-  - writing or optimising SQL,
-  - building or improving a data pipeline,
+STAR answer quality rules:
+1. Technical depth for technical roles:
+   - If the job description is technical, systems-heavy, data-heavy, analytical, operational, engineering, finance-systems, compliance-systems, CRM, ERP, reporting, automation, BI, product, or software-related, make most STAR answers technically or process specific.
+   - Show practical technical thinking: checks, systems, tools, workflows, troubleshooting, data quality, controls, trade-offs, root cause analysis, automation, reporting, or stakeholder requirements.
+   - Avoid generic STAR answers for technical roles.
+
+2. Realistic scenarios:
+   - Each STAR answer should feel like something a candidate could realistically say in an interview.
+   - Avoid dramatic, exaggerated, or overly polished stories.
+   - Keep the tone confident, professional, and believable.
+
+3. Mine the CV and job description for real situations:
+   - Extract past roles, projects, responsibilities, tools, systems, achievements, and work examples from the CV.
+   - Use those CV details as the basis for the Situation and Task wherever possible.
+   - Use the job description to choose which CV examples are most relevant.
+   - If the CV has role names, employers, projects, or tools, use them accurately.
+   - If the CV is limited, use transferable situations but clearly avoid pretending the candidate did something not shown.
+
+4. Align the Result to what the job values:
+   - Read the job description carefully and infer what outcomes the role values.
+   - If the job values cost reduction, frame results around savings, efficiency, waste reduction, or better use of resources.
+   - If the job values growth, frame results around scale, adoption, pipeline, revenue support, or commercial impact.
+   - If the job values accuracy or compliance, frame results around controls, reduced errors, audit readiness, risk reduction, or reliability.
+   - If the job values stakeholder service, frame results around clearer communication, faster decisions, user satisfaction, or stronger relationships.
+   - Do not invent exact numbers unless they appear in the CV. Use non-numeric wording such as "helped reduce", "improved", "supported", or "made it easier to".
+
+5. Include a "what not to say" tip:
+   - Each STAR answer must include a short, practical warning in whatNotToSay.
+   - Example style:
+     - "Avoid saying the conflict was unresolved."
+     - "Do not imply the whole team failed."
+     - "Avoid claiming a metric unless it appears in your CV."
+     - "Do not make it sound like you worked alone if it was a team project."
+
+6. Role seniority awareness:
+   - Infer seniority from the CV and job description.
+   - For senior candidates, STAR answers should show ownership, strategic thinking, stakeholder alignment, risk management, mentoring, decision-making, and business impact.
+   - For junior candidates, STAR answers should show learning agility, reliability, curiosity, strong execution, collaboration, and willingness to take feedback.
+   - Do not overstate seniority if the CV does not support it.
+
+7. "Steal this phrase" suggestions:
+   - Each STAR answer must include one short interview-ready power phrase in stealThisPhrase.
+   - Use a different phrase for every STAR answer.
+   - The phrase should sound natural and useful in an interview.
+   - Example styles:
+     - "I took ownership of..."
+     - "I aligned stakeholders by..."
+     - "The measurable outcome was..."
+     - "I reduced ambiguity by..."
+     - "I focused on the root cause rather than the symptom..."
+     - "I translated the requirement into a practical delivery plan..."
+
+STAR answer themes:
+- Generate 5 varied STAR answers.
+- Choose the strongest themes based on the CV and job description.
+- Good themes include:
+  - solving a technical or system issue,
+  - improving a dashboard, report, workflow, or process,
+  - writing, reviewing, or improving SQL, code, analysis, or technical logic,
+  - building or improving a data pipeline or operational process,
   - using BI tools such as Tableau or Power BI,
-  - using dbt or transformation workflows,
-  - improving data quality,
-  - automating a manual process,
-  - solving a technical issue,
-  - translating stakeholder requirements into technical outputs,
-  - using CRM, ERP, cloud, analytics, or operational systems.
-- Do not make the STAR answers generic unless the role itself is non-technical.
-- If the CV mentions relevant tools or systems, use those as the basis for the STAR answers.
-- If the job description mentions systems not found in the CV, do not pretend the candidate has used them. Instead, use transferable experience and careful wording.
-- Each STAR title should clearly show the technical or role-specific theme.
+  - using CRM, ERP, analytics, cloud, finance, compliance, or operational systems,
+  - improving data quality, reporting accuracy, controls, or governance,
+  - automating or simplifying manual work,
+  - translating stakeholder requirements into useful outputs,
+  - managing competing priorities,
+  - handling communication, stakeholder expectations, or ambiguity,
+  - learning a new system or adapting quickly.
+
+Field-specific rules:
+- title: Short and specific. Show the theme clearly.
+- situation: Base this on a real CV role, project, responsibility, or transferable experience. Mention the role/tool/context only if present in the CV.
+- task: Explain what the candidate needed to achieve and connect it to what the job description values.
+- action: Give the strongest detail here. Include practical steps, tools, checks, communication, troubleshooting, or decision-making.
+- result: Align the outcome with the job description's values. Avoid invented metrics.
+- whatNotToSay: One short warning, max 25 words.
+- stealThisPhrase: One polished phrase, max 18 words. Do not reuse phrases.
 
 ${weakInputInstruction}
 
@@ -558,13 +694,12 @@ Job Description:
 ${trimmedJD}
 `;
 
-        const parsed = await callOpenAI(prompt, 3000);
+        const parsed = await callOpenAI(prompt, 5000);
 
         parsed.companyName = providedCompany;
         parsed.companyInfo = hasCompany ? (parsed.companyInfo || "") : "";
-        parsed.starAnswers = Array.isArray(parsed.starAnswers)
-            ? parsed.starAnswers.slice(0, 3)
-            : [];
+
+        ensureStarAnswerStructure(parsed);
 
         if (validation.weak) {
             parsed.inputNote = "Tip: Adding more CV or job description detail can improve personalisation.";
