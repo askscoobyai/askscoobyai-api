@@ -1,32 +1,116 @@
 import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import OpenAI from "openai";
 
 dotenv.config();
 
 const app = express();
 
-app.use(cors());
-app.use(express.json({ limit: "2mb" }));
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+app.use(helmet());
+
+app.use(cors({
+    origin(origin, callback) {
+        if (!origin) {
+            callback(null, true);
+            return;
+        }
+
+        if (allowedOrigins.includes(origin)) {
+            callback(null, true);
+            return;
+        }
+
+        callback(new Error("Not allowed by CORS"));
+    },
+    methods: ["POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "x-api-token"]
+}));
+
+app.use(express.json({ limit: "1mb" }));
+
+const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+        error: "Too many requests. Please wait a few minutes and try again."
+    }
+});
+
+app.use(apiLimiter);
+
+function requireApiToken(req, res, next) {
+    const expectedToken = process.env.EXTENSION_API_TOKEN;
+
+    if (!expectedToken) {
+        return res.status(500).json({
+            error: "Server security token is not configured."
+        });
+    }
+
+    const providedToken = req.get("x-api-token");
+
+    if (!providedToken || providedToken !== expectedToken) {
+        return res.status(401).json({
+            error: "Unauthorised request."
+        });
+    }
+
+    next();
+}
+
+app.use(
+    [
+        "/generate-interview",
+        "/generate-star",
+        "/generate-docs",
+        "/generate-practice-feedback"
+    ],
+    requireApiToken
+);
 
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY
 });
 
+function stripHtmlAndDangerousText(value) {
+    return String(value || "")
+        .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, "")
+        .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, "")
+        .replace(/<iframe[\s\S]*?>[\s\S]*?<\/iframe>/gi, "")
+        .replace(/<object[\s\S]*?>[\s\S]*?<\/object>/gi, "")
+        .replace(/<embed[\s\S]*?>[\s\S]*?<\/embed>/gi, "")
+        .replace(/<[^>]*>/g, "")
+        .replace(/javascript:/gi, "")
+        .replace(/data:/gi, "")
+        .replace(/on\w+\s*=/gi, "")
+        .trim();
+}
+
+function cleanText(text) {
+    return stripHtmlAndDangerousText(text)
+        .trim()
+        .replace(/\s+/g, " ");
+}
+
 function trimInputs(cv, jd) {
     return {
-        trimmedCV: cv.slice(0, 5000),
-        trimmedJD: jd.slice(0, 7000)
+        trimmedCV: cleanText(cv).slice(0, 5000),
+        trimmedJD: cleanText(jd).slice(0, 7000)
     };
 }
 
 function getCompany(company) {
-    return company && company.trim() ? company.trim() : "";
-}
-
-function cleanText(text) {
-    return (text || "").trim().replace(/\s+/g, " ");
+    return cleanText(company).slice(0, 120);
 }
 
 function getWordCount(text) {
@@ -104,15 +188,61 @@ function isWeakInput(cv, jd) {
     );
 }
 
+function validateBodyShape(req) {
+    const { cv, jd, company } = req.body || {};
+
+    if (typeof cv !== "string" || typeof jd !== "string") {
+        return {
+            valid: false,
+            error: "Invalid request format."
+        };
+    }
+
+    if (company !== undefined && typeof company !== "string") {
+        return {
+            valid: false,
+            error: "Invalid company format."
+        };
+    }
+
+    if (cv.length > 10000) {
+        return {
+            valid: false,
+            error: "CV is too long. Please shorten it and try again."
+        };
+    }
+
+    if (jd.length > 14000) {
+        return {
+            valid: false,
+            error: "Job description is too long. Please shorten it and try again."
+        };
+    }
+
+    if ((company || "").length > 200) {
+        return {
+            valid: false,
+            error: "Company name is too long."
+        };
+    }
+
+    return {
+        valid: true
+    };
+}
+
 function validateInputs(cv, jd) {
-    if (isClearlyInvalidCV(cv)) {
+    const safeCV = cleanText(cv);
+    const safeJD = cleanText(jd);
+
+    if (isClearlyInvalidCV(safeCV)) {
         return {
             valid: false,
             error: "Please paste a valid CV before generating. A few full sentences or bullet points are needed."
         };
     }
 
-    if (isClearlyInvalidJD(jd)) {
+    if (isClearlyInvalidJD(safeJD)) {
         return {
             valid: false,
             error: "Please paste a valid job description before generating. It should include role details, requirements, or responsibilities."
@@ -121,8 +251,52 @@ function validateInputs(cv, jd) {
 
     return {
         valid: true,
-        weak: isWeakInput(cv, jd)
+        weak: isWeakInput(safeCV, safeJD)
     };
+}
+
+function validatePracticeBody(req) {
+    const {
+        question,
+        expectedAnswer,
+        transcript,
+        contextType,
+        cv,
+        jd,
+        company
+    } = req.body || {};
+
+    if (typeof transcript !== "string" || cleanText(transcript).length < 30) {
+        return {
+            valid: false,
+            error: "Please record or type a longer answer before requesting feedback."
+        };
+    }
+
+    const optionalFields = { question, expectedAnswer, contextType, cv, jd, company };
+
+    for (const [key, value] of Object.entries(optionalFields)) {
+        if (value !== undefined && typeof value !== "string") {
+            return {
+                valid: false,
+                error: `Invalid ${key} format.`
+            };
+        }
+    }
+
+    if ((question || "").length > 1500) {
+        return { valid: false, error: "Practice question is too long." };
+    }
+
+    if ((expectedAnswer || "").length > 4000) {
+        return { valid: false, error: "Reference answer is too long." };
+    }
+
+    if ((transcript || "").length > 6000) {
+        return { valid: false, error: "Practice transcript is too long." };
+    }
+
+    return { valid: true };
 }
 
 async function callOpenAI(prompt, maxTokens = 2500) {
@@ -353,8 +527,15 @@ function ensureStarAnswerStructure(parsed) {
 
 app.post("/generate-interview", async (req, res) => {
     try {
-        const { cv, jd, company } = req.body;
+        const bodyValidation = validateBodyShape(req);
 
+        if (!bodyValidation.valid) {
+            return res.status(400).json({
+                error: bodyValidation.error
+            });
+        }
+
+        const { cv, jd, company } = req.body;
         const validation = validateInputs(cv, jd);
 
         if (!validation.valid) {
@@ -382,7 +563,6 @@ Company culture question rule:
 - Generate question 12 only as the company motivation or company culture question.
 - Question 12 must naturally reference the company name "${providedCompany}".
 - Do not include company motivation or company culture questions in questions 1-11.
-- Example style: "What interests you most about working at ${providedCompany}, and how do you see yourself contributing to the team?"
 `
             : `
 Company culture question rule:
@@ -413,81 +593,41 @@ Rules:
 - Extract the jobTitle from the job description.
 - companyName must be the exact company value provided, or an empty string if not provided.
 - Generate exactly ${targetInterviewQuestionCount} interviewQuestions.
-- The questions must follow the exact order below.
-- Do not add category labels inside the question text.
-- Do not number the questions inside the question text.
+- Questions must follow this order:
+  1: warm self-introduction question.
+  2-4: CV-specific technical or experience-based questions. The word "CV" must appear in each question.
+  5-8: genuinely technical or system-specific questions based on the job description.
+  9-11: behavioural, stakeholder, communication, prioritisation, or role-fit questions.
+  12: company motivation/culture question only if company is provided.
+- Question 1 should use a natural variant of: "Thanks for joining us today. Could you start by telling me a little about yourself and your background?"
+- Do not use "Please introduce yourself."
+- Do not add category labels.
+- Do not number questions inside the question text.
 - Questions 1-11 must not ask why the candidate wants to work for the company.
-- Only question 12 may be company-related, and only if a company name is provided.
-
-Question structure:
-1. Question 1 must be a warm self-introduction question.
-   - Use this exact question or a very close natural variant:
-     "Thanks for joining us today. Could you start by telling me a little about yourself and your background?"
-   - Do not use the phrase "Please introduce yourself."
-   - The answer should be a concise professional introduction tailored to the CV and job description.
-
-2. Questions 2-4 must be CV-specific technical or experience-based questions.
-   - The word "CV" must appear naturally in every question from question 2 to question 4.
-   - These questions should reference tools, systems, projects, responsibilities, achievements, or previous experience clearly mentioned in the CV.
-   - Example style: "Your CV mentions using Python in your previous work. Can you talk me through how you used it day to day?"
-   - Only mention a company, role, tool, or project if it clearly appears in the CV.
-   - If the CV mentions a tool but not a company, phrase it generally.
-
-3. Questions 5-8 must be genuinely technical or system-specific questions based on the job description.
-   - These must not be behavioural questions.
-   - These must test practical technical understanding, system knowledge, troubleshooting, trade-offs, methods, workflows, tools, data, platforms, compliance processes, reporting processes, software, or operational systems mentioned in the job description.
-   - Start these questions with direct technical phrasing such as:
-     - "How would you configure..."
-     - "How would you troubleshoot..."
-     - "What checks would you perform..."
-     - "How would you use [tool/system/process] to..."
-     - "What steps would you take to..."
-     - "How would you ensure accuracy when..."
-   - Avoid behavioural phrasing such as:
-     - "Tell me about a time..."
-     - "Describe a situation..."
-     - "How do you handle stakeholders..."
-     - "How do you manage conflict..."
-   - Identify the key tools, systems, platforms, software, databases, reporting tools, cloud services, programming languages, frameworks, methodologies, regulations, processes, and technical skills in the job description.
-   - Prioritise the most prominent systems/tools/processes based on frequency, requirements, responsibilities, and essential criteria.
-   - For highly technical roles, make these questions deeply practical and technical.
-   - For less technical roles, make these questions process-specific, system-specific, compliance-specific, reporting-specific, or workflow-specific.
-
-4. Questions 9-11 must be behavioural, stakeholder, communication, prioritisation, or generic role-fit questions.
-   - These should not be company culture questions.
-   - These should still relate to the role and job description.
-   - They should test how the candidate handles realistic workplace situations.
-
-${companyQuestionInstruction}
+- Only question 12 may be company-related.
 
 Technical question rules:
-- If the role is technical or systems-heavy, at least 5 of the interview questions should be technical, systems-specific, or technical-experience based.
-- Questions 5-8 must be the most technical/system-specific questions in the list.
-- The most prominent systems/tools/processes in the job description should receive more attention.
-- Technical questions should test practical understanding, trade-offs, troubleshooting, and real workplace usage.
-- Avoid generic questions like "What is SQL?" unless the role is entry-level.
+- Questions 5-8 must be practical and technical/system-specific.
+- They must not be behavioural questions.
+- They should test tools, systems, methods, workflows, troubleshooting, checks, data, platforms, software, compliance processes, reporting processes, or operational systems from the job description.
 - Do not invent tools, systems, employers, dates, certifications, figures, or achievements.
 
 Answer rules:
 - Each answer should be 4-8 lines, approximately 70-110 words.
 - Each answer must be written in the first person.
-- For the self-introduction answer, summarise the candidate's relevant background, strengths, and fit for the role.
-- For CV-specific questions, answer using the candidate's CV evidence where possible.
-- For questions 5-8, give a technical, practical answer with concrete steps, checks, systems, methods, trade-offs, or troubleshooting logic.
-- For behavioural questions, use a practical workplace example or a careful transferable approach based on the CV.
-- For the company culture question, explain why the candidate is interested in the company and connect it to the role, the job description, or the company's apparent work.
-- If the CV does not provide enough evidence, phrase carefully and avoid pretending the candidate has done something.
-- Every interview answer must end with one short, natural closing line.
-- Use a different closing line for each answer.
-- Do not reuse the same closing line across multiple answers.
+- For CV-specific questions, answer using CV evidence where possible.
+- For questions 5-8, give concrete steps, checks, methods, trade-offs, or troubleshooting logic.
+- For behavioural questions, use a practical workplace example or careful transferable approach.
+- Every answer must end with one short, natural closing line.
+- Do not reuse the same closing line.
 
 Other rules:
 - Generate exactly 5 questionsForInterviewer.
 - Questions for the interviewer should be thoughtful and relevant.
-- If company is provided, use it naturally.
-- If company is not provided, leave companyName as an empty string.
 
 ${weakInputInstruction}
+
+${companyQuestionInstruction}
 
 Company:
 ${providedCompany || "Not provided"}
@@ -505,11 +645,9 @@ ${trimmedJD}
 
         ensureInterviewQuestionStructure(parsed, hasCompany, providedCompany);
 
-        if (Array.isArray(parsed.questionsForInterviewer)) {
-            parsed.questionsForInterviewer = parsed.questionsForInterviewer.slice(0, 5);
-        } else {
-            parsed.questionsForInterviewer = [];
-        }
+        parsed.questionsForInterviewer = Array.isArray(parsed.questionsForInterviewer)
+            ? parsed.questionsForInterviewer.slice(0, 5)
+            : [];
 
         if (validation.weak) {
             parsed.inputNote = "Tip: Adding more CV or job description detail can improve personalisation.";
@@ -521,15 +659,22 @@ ${trimmedJD}
         console.error("Interview Generation Error:", error);
 
         res.status(500).json({
-            error: error.message || "Failed to generate interview questions."
+            error: "Failed to generate interview questions."
         });
     }
 });
 
 app.post("/generate-star", async (req, res) => {
     try {
-        const { cv, jd, company } = req.body;
+        const bodyValidation = validateBodyShape(req);
 
+        if (!bodyValidation.valid) {
+            return res.status(400).json({
+                error: bodyValidation.error
+            });
+        }
+
+        const { cv, jd, company } = req.body;
         const validation = validateInputs(cv, jd);
 
         if (!validation.valid) {
@@ -545,9 +690,8 @@ app.post("/generate-star", async (req, res) => {
         const weakInputInstruction = validation.weak
             ? `
 Input detail note:
-- The CV or job description is brief. Be extra careful not to invent details.
+- The CV or job description is brief. Do not invent details.
 - STAR answers should stay grounded in what the CV actually says.
-- If evidence is limited, use careful wording such as "I would approach this by..." or "In a similar situation..." rather than inventing past achievements.
 `
             : "";
 
@@ -557,17 +701,11 @@ Company Info rules:
 - Generate a factual companyInfo mini-profile of at least 6 sentences.
 - companyInfo must only describe the company itself.
 - Do not give interview advice in companyInfo.
-- Do not mention the candidate in companyInfo.
-- Do not use phrases like "in your interview", "you can reference", "align your experience", "highlight", or "demonstrates".
-- Focus on what the company does, its sector, customers or stakeholders, products/services, mission, operating model, and relevant business priorities.
-- If the exact company cannot be confidently described from the company name and job description, say that detailed public company information is limited, then describe only what can be inferred from the job description.
+- If exact company information is limited, say that detailed public company information is limited, then describe only what can be inferred from the job description.
 `
             : `
 Company Info rules:
 - companyInfo must be an empty string.
-- Do not generate a company profile.
-- Do not mention that the company name was not provided.
-- Do not repeat any fallback message.
 `;
 
         const prompt = `
@@ -596,89 +734,19 @@ Use this exact JSON structure:
 Rules:
 - Extract the jobTitle from the job description.
 - Generate exactly 5 STAR answers.
-- The starAnswers array must contain exactly 5 objects.
-- Each STAR answer should be detailed but concise, around 150-210 words across situation, task, action, and result.
-- companyName must be the exact company value provided, or an empty string if not provided.
+- Each STAR answer should be realistic and interview-ready.
 - Do not invent employers, dates, qualifications, certifications, figures, achievements, tools, systems, or metrics.
-- If evidence is missing from the CV, phrase carefully instead of inventing.
-
-STAR answer quality rules:
-1. Technical depth for technical roles:
-   - If the job description is technical, systems-heavy, data-heavy, analytical, operational, engineering, finance-systems, compliance-systems, CRM, ERP, reporting, automation, BI, product, or software-related, make most STAR answers technically or process specific.
-   - Show practical technical thinking: checks, systems, tools, workflows, troubleshooting, data quality, controls, trade-offs, root cause analysis, automation, reporting, or stakeholder requirements.
-   - Avoid generic STAR answers for technical roles.
-
-2. Realistic scenarios:
-   - Each STAR answer should feel like something a candidate could realistically say in an interview.
-   - Avoid dramatic, exaggerated, or overly polished stories.
-   - Keep the tone confident, professional, and believable.
-
-3. Mine the CV and job description for real situations:
-   - Extract past roles, projects, responsibilities, tools, systems, achievements, and work examples from the CV.
-   - Use those CV details as the basis for the Situation and Task wherever possible.
-   - Use the job description to choose which CV examples are most relevant.
-   - If the CV has role names, employers, projects, or tools, use them accurately.
-   - If the CV is limited, use transferable situations but clearly avoid pretending the candidate did something not shown.
-
-4. Align the Result to what the job values:
-   - Read the job description carefully and infer what outcomes the role values.
-   - If the job values cost reduction, frame results around savings, efficiency, waste reduction, or better use of resources.
-   - If the job values growth, frame results around scale, adoption, pipeline, revenue support, or commercial impact.
-   - If the job values accuracy or compliance, frame results around controls, reduced errors, audit readiness, risk reduction, or reliability.
-   - If the job values stakeholder service, frame results around clearer communication, faster decisions, user satisfaction, or stronger relationships.
-   - Do not invent exact numbers unless they appear in the CV. Use non-numeric wording such as "helped reduce", "improved", "supported", or "made it easier to".
-
-5. Include a "what not to say" tip:
-   - Each STAR answer must include a short, practical warning in whatNotToSay.
-   - Example style:
-     - "Avoid saying the conflict was unresolved."
-     - "Do not imply the whole team failed."
-     - "Avoid claiming a metric unless it appears in your CV."
-     - "Do not make it sound like you worked alone if it was a team project."
-
-6. Role seniority awareness:
-   - Infer seniority from the CV and job description.
-   - For senior candidates, STAR answers should show ownership, strategic thinking, stakeholder alignment, risk management, mentoring, decision-making, and business impact.
-   - For junior candidates, STAR answers should show learning agility, reliability, curiosity, strong execution, collaboration, and willingness to take feedback.
-   - Do not overstate seniority if the CV does not support it.
-
-7. "Steal this phrase" suggestions:
-   - Each STAR answer must include one short interview-ready power phrase in stealThisPhrase.
-   - Use a different phrase for every STAR answer.
-   - The phrase should sound natural and useful in an interview.
-   - Example styles:
-     - "I took ownership of..."
-     - "I aligned stakeholders by..."
-     - "The measurable outcome was..."
-     - "I reduced ambiguity by..."
-     - "I focused on the root cause rather than the symptom..."
-     - "I translated the requirement into a practical delivery plan..."
-
-STAR answer themes:
-- Generate 5 varied STAR answers.
-- Choose the strongest themes based on the CV and job description.
-- Good themes include:
-  - solving a technical or system issue,
-  - improving a dashboard, report, workflow, or process,
-  - writing, reviewing, or improving SQL, code, analysis, or technical logic,
-  - building or improving a data pipeline or operational process,
-  - using BI tools such as Tableau or Power BI,
-  - using CRM, ERP, analytics, cloud, finance, compliance, or operational systems,
-  - improving data quality, reporting accuracy, controls, or governance,
-  - automating or simplifying manual work,
-  - translating stakeholder requirements into useful outputs,
-  - managing competing priorities,
-  - handling communication, stakeholder expectations, or ambiguity,
-  - learning a new system or adapting quickly.
-
-Field-specific rules:
-- title: Short and specific. Show the theme clearly.
-- situation: Base this on a real CV role, project, responsibility, or transferable experience. Mention the role/tool/context only if present in the CV.
-- task: Explain what the candidate needed to achieve and connect it to what the job description values.
-- action: Give the strongest detail here. Include practical steps, tools, checks, communication, troubleshooting, or decision-making.
-- result: Align the outcome with the job description's values. Avoid invented metrics.
-- whatNotToSay: One short warning, max 25 words.
-- stealThisPhrase: One polished phrase, max 18 words. Do not reuse phrases.
+- Mine the CV for real roles, projects, responsibilities, tools, systems, achievements, and work examples.
+- Use the job description to choose the most relevant CV examples.
+- For technical roles, make most STAR answers technical, process-specific, or systems-specific.
+- Align each result to what the job values: cost reduction, growth, accuracy, compliance, stakeholder service, efficiency, reliability, or scale.
+- Infer seniority from the CV and job description.
+- Senior candidates should show ownership, strategy, stakeholder alignment, risk management, mentoring, and impact.
+- Junior candidates should show learning agility, reliability, execution, curiosity, and collaboration.
+- Each STAR answer must include:
+  - whatNotToSay: short warning, max 25 words.
+  - stealThisPhrase: short interview-ready phrase, max 18 words.
+- Use different stealThisPhrase wording for each answer.
 
 ${weakInputInstruction}
 
@@ -711,15 +779,22 @@ ${trimmedJD}
         console.error("STAR Generation Error:", error);
 
         res.status(500).json({
-            error: error.message || "Failed to generate STAR answers."
+            error: "Failed to generate STAR answers."
         });
     }
 });
 
 app.post("/generate-docs", async (req, res) => {
     try {
-        const { cv, jd, company } = req.body;
+        const bodyValidation = validateBodyShape(req);
 
+        if (!bodyValidation.valid) {
+            return res.status(400).json({
+                error: bodyValidation.error
+            });
+        }
+
+        const { cv, jd, company } = req.body;
         const validation = validateInputs(cv, jd);
 
         if (!validation.valid) {
@@ -734,8 +809,7 @@ app.post("/generate-docs", async (req, res) => {
         const weakInputInstruction = validation.weak
             ? `
 Input detail note:
-- The CV or job description is brief. Be extra careful not to invent details.
-- Keep the cover letter general where needed, and only mention specific achievements if they appear in the CV.
+- The CV or job description is brief. Be careful not to invent details.
 `
             : "";
 
@@ -754,28 +828,13 @@ Use this exact JSON structure:
 
 Rules:
 - Extract the jobTitle from the job description.
-- Generate one concise tailored cover letter.
-- Cover letter should be around 120-160 words.
+- Generate one concise tailored cover letter around 120-160 words.
 - Generate exactly 5 cvImprovementPreview bullet points.
 - Do not invent employers, dates, qualifications, certifications, figures, or achievements.
-- If company is provided, use it naturally in the cover letter.
-- If company is not provided, write the cover letter without naming a company.
-- companyName must be the exact company value provided, or an empty string if not provided.
-
-CV improvement rules:
-- Each CV improvement point must be specific and actionable.
-- Each point should identify which previous role, project, section, skill, or experience from the CV should be updated.
-- Each point should explain which job requirement it connects to.
-- Each point should say exactly what to add, clarify, or strengthen.
+- If company is provided, use it naturally.
+- If company is not provided, write without naming a company.
+- CV improvement points must be specific, actionable, and connected to job requirements.
 - Where possible, include an example rewritten bullet.
-- Do not give generic advice like "add more metrics" unless you also specify where and how.
-- If the CV does not clearly show role names or company names, refer to the relevant experience more generally, e.g. "your analytics experience", "your dashboarding work", or "your Python project".
-- Prioritise technical systems, tools, platforms, reporting responsibilities, stakeholder requirements, and role-critical skills mentioned in the job description.
-- Make the advice practical enough that the user can copy it into their CV after editing.
-
-Expected style for cvImprovementPreview:
-- "Update your [specific role/experience/section] to better reflect [job requirement]. Add detail on [tool/process/impact]. Example rewrite: '[example bullet]'."
-- "In your [specific previous role/experience], strengthen the bullet about [activity] by mentioning [tool/system/stakeholder/outcome], because this role asks for [job requirement]."
 
 ${weakInputInstruction}
 
@@ -790,13 +849,11 @@ ${trimmedJD}
 `;
 
         const parsed = await callOpenAI(prompt, 2400);
-        parsed.companyName = providedCompany;
 
-        if (Array.isArray(parsed.cvImprovementPreview)) {
-            parsed.cvImprovementPreview = parsed.cvImprovementPreview.slice(0, 5);
-        } else {
-            parsed.cvImprovementPreview = [];
-        }
+        parsed.companyName = providedCompany;
+        parsed.cvImprovementPreview = Array.isArray(parsed.cvImprovementPreview)
+            ? parsed.cvImprovementPreview.slice(0, 5)
+            : [];
 
         if (validation.weak) {
             parsed.inputNote = "Tip: Adding more CV or job description detail can improve personalisation.";
@@ -808,7 +865,101 @@ ${trimmedJD}
         console.error("Docs Generation Error:", error);
 
         res.status(500).json({
-            error: error.message || "Failed to generate cover letter and CV tips."
+            error: "Failed to generate cover letter and CV tips."
+        });
+    }
+});
+
+app.post("/generate-practice-feedback", async (req, res) => {
+    try {
+        const validation = validatePracticeBody(req);
+
+        if (!validation.valid) {
+            return res.status(400).json({
+                error: validation.error
+            });
+        }
+
+        const {
+            question,
+            expectedAnswer,
+            transcript,
+            contextType,
+            cv,
+            jd,
+            company
+        } = req.body;
+
+        const safeQuestion = cleanText(question).slice(0, 1000);
+        const safeExpectedAnswer = cleanText(expectedAnswer).slice(0, 3000);
+        const safeTranscript = cleanText(transcript).slice(0, 5000);
+        const safeContextType = cleanText(contextType).slice(0, 50);
+        const safeCompany = getCompany(company);
+        const { trimmedCV, trimmedJD } = trimInputs(cv || "", jd || "");
+
+        const prompt = `
+You are AskScoobyAI, an expert interview coach.
+
+Return ONLY valid JSON. Do not include markdown or code fences.
+
+Use this exact JSON structure:
+{
+  "overallScore": 0,
+  "summaryFeedback": "string",
+  "strengths": ["string"],
+  "improvements": ["string"],
+  "structureFeedback": "string",
+  "technicalDepthFeedback": "string",
+  "deliveryFeedback": "string",
+  "improvedAnswer": "string"
+}
+
+Context:
+- Practice type: ${safeContextType || "interview"}
+- Company: ${safeCompany || "Not provided"}
+
+Question or STAR prompt:
+${safeQuestion}
+
+Reference answer or STAR example:
+${safeExpectedAnswer}
+
+Candidate spoken answer transcript:
+${safeTranscript}
+
+CV:
+${trimmedCV}
+
+Job Description:
+${trimmedJD}
+
+Feedback rules:
+- Score the spoken answer from 1 to 10.
+- Be encouraging but honest.
+- Focus on interview performance, not grammar alone.
+- If this is an interview question, assess relevance, structure, specificity, confidence, role fit, and completeness.
+- If this is a STAR answer, assess Situation, Task, Action, Result clarity.
+- For technical answers, assess technical depth, trade-offs, tools, systems, checks, troubleshooting, and practical detail.
+- Mention if the answer is too vague, too long, too short, generic, or missing impact.
+- Do not invent candidate experience.
+- improvedAnswer should be a stronger first-person answer the candidate could say out loud.
+- strengths must contain exactly 3 bullet points.
+- improvements must contain exactly 3 bullet points.
+`;
+
+        const parsed = await callOpenAI(prompt, 2200);
+
+        parsed.overallScore = Number(parsed.overallScore) || 0;
+        parsed.strengths = Array.isArray(parsed.strengths) ? parsed.strengths.slice(0, 3) : [];
+        parsed.improvements = Array.isArray(parsed.improvements) ? parsed.improvements.slice(0, 3) : [];
+
+        res.json(parsed);
+
+    } catch (error) {
+        console.error("Practice Feedback Error:", error);
+
+        res.status(500).json({
+            error: "Failed to generate practice feedback."
         });
     }
 });
