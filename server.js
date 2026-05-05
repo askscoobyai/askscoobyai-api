@@ -156,6 +156,8 @@ app.post("/generate-interview", async (req, res) => {
 
         const { trimmedCV, trimmedJD } = trimInputs(cv, jd);
         const providedCompany = getCompany(company);
+        const hasCompany = providedCompany.length > 1;
+        const targetInterviewQuestionCount = hasCompany ? 12 : 11;
 
         const weakInputInstruction = validation.weak
             ? `
@@ -164,6 +166,20 @@ Input detail note:
 - Keep answers useful, but avoid claiming specific achievements, tools, employers, metrics, or responsibilities unless they appear in the CV or job description.
 `
             : "";
+
+        const companyQuestionInstruction = hasCompany
+            ? `
+Company culture question rule:
+- Generate question 12 as a company culture or company motivation question.
+- It should naturally reference the company name "${providedCompany}".
+- Example style: "Why do you want to work at ${providedCompany}?" or "What interests you about ${providedCompany}'s culture and mission?"
+`
+            : `
+Company culture question rule:
+- Do not generate a company culture or company motivation question.
+- Do not ask "Why do you want to work here?"
+- Because no company name was provided, generate exactly 11 interviewQuestions only.
+`;
 
         const prompt = `
 You are AskScoobyAI, an expert interview preparation assistant.
@@ -185,16 +201,26 @@ Use this exact JSON structure:
 
 Rules:
 - Extract the jobTitle from the job description.
-- Generate exactly 10 interviewQuestions.
+- companyName must be the exact company value provided, or an empty string if not provided.
+- Generate exactly ${targetInterviewQuestionCount} interviewQuestions.
 - The questions must be ordered strategically.
+- Do not add category labels inside the question text.
+- Do not number the questions inside the question text.
 
 Question structure:
-1. Questions 1-3 should be CV-specific technical or experience-based questions.
-   - These should reference tools, systems, projects, responsibilities, or previous experience clearly mentioned in the CV.
-   - Example style: "Your CV mentions using Python at [Company/Role]. Can you talk me through how you used it day to day?"
+1. Question 1 must be a self-introduction question.
+   - Example style: "Thanks for joining the interview. Please introduce yourself."
+   - Use a natural interviewer tone.
+   - The answer should be a concise professional introduction tailored to the CV and job description.
+
+2. Questions 2-4 must be CV-specific technical or experience-based questions.
+   - The word "CV" must appear naturally in every question from question 2 to question 4.
+   - These questions should reference tools, systems, projects, responsibilities, achievements, or previous experience clearly mentioned in the CV.
+   - Example style: "Your CV mentions using Python in your previous work. Can you talk me through how you used it day to day?"
    - Only mention a company, role, tool, or project if it clearly appears in the CV.
    - If the CV mentions a tool but not a company, phrase it generally, e.g. "Your CV mentions experience with dbt. How have you used it in your work?"
-2. Questions 4-7 should be technical/system-specific questions based on the job description.
+
+3. Questions 5-8 must be technical or system-specific questions based on the job description.
    - Identify the key tools, systems, platforms, software, databases, reporting tools, cloud services, programming languages, frameworks, methodologies, and technical skills in the job description.
    - Prioritise the most prominent systems/tools based on frequency, requirements, responsibilities, and essential criteria.
    - For highly technical roles, make these questions practical and technical.
@@ -207,12 +233,16 @@ Question structure:
      - dbt: models, tests, lineage, transformations.
      - Cloud/data tools: pipelines, permissions, storage, orchestration, monitoring.
      - CRM/ERP/reporting tools: workflows, data quality, reporting, user adoption.
-3. Questions 8-10 should be behavioural, stakeholder, communication, prioritisation, or role-fit questions.
+
+4. Questions 9-11 must be behavioural, stakeholder, communication, prioritisation, or role-fit questions.
    - These should still relate to the role and job description.
+   - They should test how the candidate handles realistic workplace situations.
+
+${companyQuestionInstruction}
 
 Technical question rules:
-- If the role is technical or systems-heavy, at least 5 of the 10 questions should be technical or system-specific.
-- The most prominent systems/tools in the job description should receive more questions.
+- If the role is technical or systems-heavy, at least 5 of the interview questions should be technical, systems-specific, or technical-experience based.
+- The most prominent systems/tools in the job description should receive more attention.
 - Technical questions should test practical understanding, trade-offs, troubleshooting, and real workplace usage.
 - Avoid generic questions like "What is SQL?" unless the role is entry-level.
 - Do not invent tools, systems, employers, dates, certifications, figures, or achievements.
@@ -220,8 +250,11 @@ Technical question rules:
 Answer rules:
 - Each answer should be 4-8 lines, approximately 70-110 words.
 - Each answer must be written in the first person.
+- For the self-introduction answer, summarise the candidate's relevant background, strengths, and fit for the role.
 - For CV-specific questions, answer using the candidate's CV evidence where possible.
 - For JD technical questions, provide a clear explanation, a practical example, and how the candidate could apply it in the role.
+- For behavioural questions, use a practical workplace example or a careful transferable approach based on the CV.
+- For the company culture question, explain why the candidate is interested in the company and connect it to the role, the job description, or the company's apparent work.
 - If the CV does not provide enough evidence, phrase carefully and avoid pretending the candidate has done something.
 - Every interview answer must end with one short, natural closing line.
 - The closing line must be relevant to the answer and role.
@@ -252,8 +285,21 @@ Job Description:
 ${trimmedJD}
 `;
 
-        const parsed = await callOpenAI(prompt, 3200);
+        const parsed = await callOpenAI(prompt, 4200);
+
         parsed.companyName = providedCompany;
+
+        if (Array.isArray(parsed.interviewQuestions)) {
+            parsed.interviewQuestions = parsed.interviewQuestions.slice(0, targetInterviewQuestionCount);
+        } else {
+            parsed.interviewQuestions = [];
+        }
+
+        if (Array.isArray(parsed.questionsForInterviewer)) {
+            parsed.questionsForInterviewer = parsed.questionsForInterviewer.slice(0, 5);
+        } else {
+            parsed.questionsForInterviewer = [];
+        }
 
         if (validation.weak) {
             parsed.inputNote = "Tip: Adding more CV or job description detail can improve personalisation.";
