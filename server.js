@@ -142,6 +142,44 @@ async function callOpenAI(prompt, maxTokens = 2500) {
     return JSON.parse(completion.choices[0].message.content.trim());
 }
 
+function buildFallbackCompanyCultureQuestion(companyName) {
+    return {
+        question: `What interests you most about working at ${companyName}, and how do you see yourself contributing to the team?`,
+        answer: `What interests me about ${companyName} is the opportunity to contribute in a role where my experience can be applied in a practical and meaningful way. From the job description, I can see there is a strong focus on delivering value, working with stakeholders, and using the right skills to solve real business problems. I’m looking for a role where I can keep developing while also making a clear contribution to the team. That’s something I’d be excited to bring into this role.`
+    };
+}
+
+function ensureInterviewQuestionCount(parsed, hasCompany, companyName) {
+    const targetCount = hasCompany ? 12 : 11;
+
+    if (!Array.isArray(parsed.interviewQuestions)) {
+        parsed.interviewQuestions = [];
+    }
+
+    if (!hasCompany) {
+        parsed.interviewQuestions = parsed.interviewQuestions
+            .filter((item) => {
+                const question = cleanText(item?.question || "").toLowerCase();
+                return (
+                    !question.includes("why do you want to work") &&
+                    !question.includes("company culture") &&
+                    !question.includes("work here")
+                );
+            })
+            .slice(0, targetCount);
+
+        return parsed;
+    }
+
+    parsed.interviewQuestions = parsed.interviewQuestions.slice(0, targetCount);
+
+    while (parsed.interviewQuestions.length < targetCount) {
+        parsed.interviewQuestions.push(buildFallbackCompanyCultureQuestion(companyName));
+    }
+
+    return parsed;
+}
+
 app.post("/generate-interview", async (req, res) => {
     try {
         const { cv, jd, company } = req.body;
@@ -171,8 +209,9 @@ Input detail note:
             ? `
 Company culture question rule:
 - Generate question 12 as a company culture or company motivation question.
-- It should naturally reference the company name "${providedCompany}".
-- Example style: "Why do you want to work at ${providedCompany}?" or "What interests you about ${providedCompany}'s culture and mission?"
+- It must naturally reference the company name "${providedCompany}".
+- Example style: "What interests you most about working at ${providedCompany}, and how do you see yourself contributing to the team?"
+- Do not use a generic company question if the company name is available.
 `
             : `
 Company culture question rule:
@@ -208,9 +247,10 @@ Rules:
 - Do not number the questions inside the question text.
 
 Question structure:
-1. Question 1 must be a self-introduction question.
-   - Example style: "Thanks for joining the interview. Please introduce yourself."
-   - Use a natural interviewer tone.
+1. Question 1 must be a warm self-introduction question.
+   - Use this exact question or a very close natural variant:
+     "Thanks for joining us today. Could you start by telling me a little about yourself and your background?"
+   - Do not use the phrase "Please introduce yourself."
    - The answer should be a concise professional introduction tailored to the CV and job description.
 
 2. Questions 2-4 must be CV-specific technical or experience-based questions.
@@ -218,21 +258,13 @@ Question structure:
    - These questions should reference tools, systems, projects, responsibilities, achievements, or previous experience clearly mentioned in the CV.
    - Example style: "Your CV mentions using Python in your previous work. Can you talk me through how you used it day to day?"
    - Only mention a company, role, tool, or project if it clearly appears in the CV.
-   - If the CV mentions a tool but not a company, phrase it generally, e.g. "Your CV mentions experience with dbt. How have you used it in your work?"
+   - If the CV mentions a tool but not a company, phrase it generally.
 
 3. Questions 5-8 must be technical or system-specific questions based on the job description.
    - Identify the key tools, systems, platforms, software, databases, reporting tools, cloud services, programming languages, frameworks, methodologies, and technical skills in the job description.
    - Prioritise the most prominent systems/tools based on frequency, requirements, responsibilities, and essential criteria.
    - For highly technical roles, make these questions practical and technical.
    - For less technical roles, make these questions role-specific and scenario-based.
-   - Do not limit yourself to SQL, Tableau, Power BI, or dbt. Adapt to whatever systems appear in the job description.
-   - Example topics:
-     - Tableau: live vs extract connections, performance optimisation, dashboard design.
-     - Power BI: DAX, relationships, parameters, Power Query, data modelling.
-     - SQL: joins, window functions, CTEs, query optimisation.
-     - dbt: models, tests, lineage, transformations.
-     - Cloud/data tools: pipelines, permissions, storage, orchestration, monitoring.
-     - CRM/ERP/reporting tools: workflows, data quality, reporting, user adoption.
 
 4. Questions 9-11 must be behavioural, stakeholder, communication, prioritisation, or role-fit questions.
    - These should still relate to the role and job description.
@@ -257,14 +289,7 @@ Answer rules:
 - For the company culture question, explain why the candidate is interested in the company and connect it to the role, the job description, or the company's apparent work.
 - If the CV does not provide enough evidence, phrase carefully and avoid pretending the candidate has done something.
 - Every interview answer must end with one short, natural closing line.
-- The closing line must be relevant to the answer and role.
 - Use a different closing line for each answer.
-- Closing lines should sound similar in style to:
-  "That’s how I approached it in that scenario."
-  "That worked well in practice."
-  "That’s been my experience so far."
-  "I’d apply the same approach here as well."
-  "That’s something I’d look to bring into this role."
 - Do not reuse the same closing line across multiple answers.
 
 Other rules:
@@ -289,11 +314,7 @@ ${trimmedJD}
 
         parsed.companyName = providedCompany;
 
-        if (Array.isArray(parsed.interviewQuestions)) {
-            parsed.interviewQuestions = parsed.interviewQuestions.slice(0, targetInterviewQuestionCount);
-        } else {
-            parsed.interviewQuestions = [];
-        }
+        ensureInterviewQuestionCount(parsed, hasCompany, providedCompany);
 
         if (Array.isArray(parsed.questionsForInterviewer)) {
             parsed.questionsForInterviewer = parsed.questionsForInterviewer.slice(0, 5);
