@@ -135,11 +135,79 @@ async function callOpenAI(prompt, maxTokens = 2500) {
                 content: prompt
             }
         ],
-        temperature: 0.3,
+        temperature: 0.25,
         max_tokens: maxTokens
     });
 
     return JSON.parse(completion.choices[0].message.content.trim());
+}
+
+function buildFallbackIntroQuestion() {
+    return {
+        question: "Thanks for joining us today. Could you start by telling me a little about yourself and your background?",
+        answer: "I would start by giving a concise overview of my background, focusing on the experience most relevant to this role. I would highlight the main skills, tools, and responsibilities from my CV that connect to the job description, then explain why this opportunity feels like a strong next step. I would keep the answer professional, clear, and tailored to the role rather than simply repeating my CV. That would help set the tone for the rest of the interview."
+    };
+}
+
+function buildFallbackCVQuestion(index) {
+    const questions = [
+        {
+            question: "Your CV mentions relevant experience for this role. Can you talk me through one example that best shows your technical or role-specific strengths?",
+            answer: "I would choose an example from my CV that closely matches the requirements in the job description. I would explain the context, what I was responsible for, the tools or processes I used, and the outcome of the work. I would keep the answer grounded in what I have actually done, while making the link to this role clear. That would help show how my previous experience could transfer into this position."
+        },
+        {
+            question: "Looking at your CV, which project or responsibility do you think is most relevant to this role, and why?",
+            answer: "I would pick the project or responsibility from my CV that has the strongest connection to the job description. I would explain what made it relevant, what I contributed personally, and how it helped me build skills that would be useful in this role. I would avoid overclaiming and focus on the parts of the experience that are clearly supported by my CV. That’s the kind of experience I’d look to build on here."
+        },
+        {
+            question: "Your CV shows a range of experience. Which technical or practical skill from your background would help you most in this role?",
+            answer: "I would identify one technical or practical skill from my CV that aligns closely with the role requirements. I would explain how I have used that skill, what I learned from applying it, and how I would adapt it to the systems or responsibilities in this position. I would keep the answer specific and evidence-based. That’s something I’d aim to bring into this role from day one."
+        }
+    ];
+
+    return questions[index] || questions[0];
+}
+
+function buildFallbackTechnicalQuestion(index) {
+    const questions = [
+        {
+            question: "Based on the job description, how would you approach learning and working with the main systems, tools, or processes required in this role?",
+            answer: "I would start by understanding how the main systems or tools are used in the team’s day-to-day work. I would look at existing documentation, review examples of good outputs, and ask focused questions to understand expectations and common issues. Once I understood the workflow, I would practise on real tasks and check my work carefully for accuracy and quality. That approach would help me become productive while reducing mistakes."
+        },
+        {
+            question: "What technical checks would you carry out to make sure your work is accurate, reliable, and fit for purpose in this role?",
+            answer: "I would check the input data, assumptions, calculations, logic, and final output before sharing anything with stakeholders. If the work involved systems, reports, analysis, or operational processes, I would compare results against known sources and investigate any unexpected differences. I would also document key steps so the work could be reviewed or repeated later. That’s how I would keep the work reliable and useful."
+        },
+        {
+            question: "If a system, report, process, or technical output was not working as expected, how would you troubleshoot it?",
+            answer: "I would break the issue down step by step rather than guessing. First, I would confirm what the expected result should be, then check the source inputs, configuration, logic, permissions, and recent changes. I would try to isolate where the issue starts and test one change at a time. If needed, I would involve the right colleague with a clear summary of what I had already checked. That would help solve the issue efficiently."
+        },
+        {
+            question: "How would you balance speed and accuracy when delivering technical or system-based work under time pressure?",
+            answer: "I would first clarify the deadline, the purpose of the work, and which parts are most critical. Then I would prioritise the core technical output, apply the most important quality checks, and communicate early if there were any risks or trade-offs. I would avoid rushing work that could lead to incorrect decisions, especially where accuracy matters. That’s how I would balance delivery pace with dependable results."
+        }
+    ];
+
+    return questions[index] || questions[0];
+}
+
+function buildFallbackBehaviouralQuestion(index) {
+    const questions = [
+        {
+            question: "Tell me about a time you had to manage competing priorities. How did you decide what to focus on first?",
+            answer: "I would start by understanding the urgency, importance, and impact of each task. I would clarify deadlines where needed, identify dependencies, and focus first on the work that had the greatest business or stakeholder impact. I would also communicate clearly if timelines needed to be adjusted. That approach helps me stay organised while making sure the most important work is handled properly."
+        },
+        {
+            question: "How do you communicate complex information to stakeholders who may not have the same technical background?",
+            answer: "I try to understand what the stakeholder needs to know and avoid unnecessary technical detail. I would explain the key message first, then use simple language, examples, or visuals where helpful. If there are risks, assumptions, or limitations, I would make those clear as well. That helps ensure the information is useful, not just technically correct."
+        },
+        {
+            question: "What kind of working environment helps you perform at your best?",
+            answer: "I perform best in an environment where expectations are clear, communication is open, and people are focused on delivering good-quality work. I value having ownership of my responsibilities while also being able to ask questions and collaborate when needed. I also appreciate constructive feedback because it helps me improve. That kind of environment helps me do my best work consistently."
+        }
+    ];
+
+    return questions[index] || questions[0];
 }
 
 function buildFallbackCompanyCultureQuestion(companyName) {
@@ -149,33 +217,59 @@ function buildFallbackCompanyCultureQuestion(companyName) {
     };
 }
 
-function ensureInterviewQuestionCount(parsed, hasCompany, companyName) {
+function isCompanyQuestion(item, companyName) {
+    const question = cleanText(item?.question || "").toLowerCase();
+    const company = cleanText(companyName).toLowerCase();
+
+    return (
+        question.includes("why do you want to work") ||
+        question.includes("work here") ||
+        question.includes("company culture") ||
+        question.includes("interests you most about working") ||
+        question.includes(company)
+    );
+}
+
+function isQuestionObject(item) {
+    return (
+        item &&
+        typeof item.question === "string" &&
+        typeof item.answer === "string" &&
+        cleanText(item.question) &&
+        cleanText(item.answer)
+    );
+}
+
+function ensureInterviewQuestionStructure(parsed, hasCompany, companyName) {
     const targetCount = hasCompany ? 12 : 11;
+    const originalQuestions = Array.isArray(parsed.interviewQuestions)
+        ? parsed.interviewQuestions.filter(isQuestionObject)
+        : [];
 
-    if (!Array.isArray(parsed.interviewQuestions)) {
-        parsed.interviewQuestions = [];
+    const nonCompanyQuestions = originalQuestions.filter((item) => !isCompanyQuestion(item, companyName));
+    const companyQuestions = originalQuestions.filter((item) => isCompanyQuestion(item, companyName));
+
+    const finalQuestions = [];
+
+    finalQuestions[0] = nonCompanyQuestions[0] || buildFallbackIntroQuestion();
+
+    for (let i = 1; i <= 3; i++) {
+        finalQuestions[i] = nonCompanyQuestions[i] || buildFallbackCVQuestion(i - 1);
     }
 
-    if (!hasCompany) {
-        parsed.interviewQuestions = parsed.interviewQuestions
-            .filter((item) => {
-                const question = cleanText(item?.question || "").toLowerCase();
-                return (
-                    !question.includes("why do you want to work") &&
-                    !question.includes("company culture") &&
-                    !question.includes("work here")
-                );
-            })
-            .slice(0, targetCount);
-
-        return parsed;
+    for (let i = 4; i <= 7; i++) {
+        finalQuestions[i] = nonCompanyQuestions[i] || buildFallbackTechnicalQuestion(i - 4);
     }
 
-    parsed.interviewQuestions = parsed.interviewQuestions.slice(0, targetCount);
-
-    while (parsed.interviewQuestions.length < targetCount) {
-        parsed.interviewQuestions.push(buildFallbackCompanyCultureQuestion(companyName));
+    for (let i = 8; i <= 10; i++) {
+        finalQuestions[i] = nonCompanyQuestions[i] || buildFallbackBehaviouralQuestion(i - 8);
     }
+
+    if (hasCompany) {
+        finalQuestions[11] = companyQuestions[0] || buildFallbackCompanyCultureQuestion(companyName);
+    }
+
+    parsed.interviewQuestions = finalQuestions.slice(0, targetCount);
 
     return parsed;
 }
@@ -208,10 +302,10 @@ Input detail note:
         const companyQuestionInstruction = hasCompany
             ? `
 Company culture question rule:
-- Generate question 12 as a company culture or company motivation question.
-- It must naturally reference the company name "${providedCompany}".
+- Generate question 12 only as the company motivation or company culture question.
+- Question 12 must naturally reference the company name "${providedCompany}".
+- Do not include company motivation or company culture questions in questions 1-11.
 - Example style: "What interests you most about working at ${providedCompany}, and how do you see yourself contributing to the team?"
-- Do not use a generic company question if the company name is available.
 `
             : `
 Company culture question rule:
@@ -242,9 +336,11 @@ Rules:
 - Extract the jobTitle from the job description.
 - companyName must be the exact company value provided, or an empty string if not provided.
 - Generate exactly ${targetInterviewQuestionCount} interviewQuestions.
-- The questions must be ordered strategically.
+- The questions must follow the exact order below.
 - Do not add category labels inside the question text.
 - Do not number the questions inside the question text.
+- Questions 1-11 must not ask why the candidate wants to work for the company.
+- Only question 12 may be company-related, and only if a company name is provided.
 
 Question structure:
 1. Question 1 must be a warm self-introduction question.
@@ -260,13 +356,28 @@ Question structure:
    - Only mention a company, role, tool, or project if it clearly appears in the CV.
    - If the CV mentions a tool but not a company, phrase it generally.
 
-3. Questions 5-8 must be technical or system-specific questions based on the job description.
-   - Identify the key tools, systems, platforms, software, databases, reporting tools, cloud services, programming languages, frameworks, methodologies, and technical skills in the job description.
-   - Prioritise the most prominent systems/tools based on frequency, requirements, responsibilities, and essential criteria.
-   - For highly technical roles, make these questions practical and technical.
-   - For less technical roles, make these questions role-specific and scenario-based.
+3. Questions 5-8 must be genuinely technical or system-specific questions based on the job description.
+   - These must not be behavioural questions.
+   - These must test practical technical understanding, system knowledge, troubleshooting, trade-offs, methods, workflows, tools, data, platforms, compliance processes, reporting processes, software, or operational systems mentioned in the job description.
+   - Start these questions with direct technical phrasing such as:
+     - "How would you configure..."
+     - "How would you troubleshoot..."
+     - "What checks would you perform..."
+     - "How would you use [tool/system/process] to..."
+     - "What steps would you take to..."
+     - "How would you ensure accuracy when..."
+   - Avoid behavioural phrasing such as:
+     - "Tell me about a time..."
+     - "Describe a situation..."
+     - "How do you handle stakeholders..."
+     - "How do you manage conflict..."
+   - Identify the key tools, systems, platforms, software, databases, reporting tools, cloud services, programming languages, frameworks, methodologies, regulations, processes, and technical skills in the job description.
+   - Prioritise the most prominent systems/tools/processes based on frequency, requirements, responsibilities, and essential criteria.
+   - For highly technical roles, make these questions deeply practical and technical.
+   - For less technical roles, make these questions process-specific, system-specific, compliance-specific, reporting-specific, or workflow-specific.
 
-4. Questions 9-11 must be behavioural, stakeholder, communication, prioritisation, or role-fit questions.
+4. Questions 9-11 must be behavioural, stakeholder, communication, prioritisation, or generic role-fit questions.
+   - These should not be company culture questions.
    - These should still relate to the role and job description.
    - They should test how the candidate handles realistic workplace situations.
 
@@ -274,7 +385,8 @@ ${companyQuestionInstruction}
 
 Technical question rules:
 - If the role is technical or systems-heavy, at least 5 of the interview questions should be technical, systems-specific, or technical-experience based.
-- The most prominent systems/tools in the job description should receive more attention.
+- Questions 5-8 must be the most technical/system-specific questions in the list.
+- The most prominent systems/tools/processes in the job description should receive more attention.
 - Technical questions should test practical understanding, trade-offs, troubleshooting, and real workplace usage.
 - Avoid generic questions like "What is SQL?" unless the role is entry-level.
 - Do not invent tools, systems, employers, dates, certifications, figures, or achievements.
@@ -284,7 +396,7 @@ Answer rules:
 - Each answer must be written in the first person.
 - For the self-introduction answer, summarise the candidate's relevant background, strengths, and fit for the role.
 - For CV-specific questions, answer using the candidate's CV evidence where possible.
-- For JD technical questions, provide a clear explanation, a practical example, and how the candidate could apply it in the role.
+- For questions 5-8, give a technical, practical answer with concrete steps, checks, systems, methods, trade-offs, or troubleshooting logic.
 - For behavioural questions, use a practical workplace example or a careful transferable approach based on the CV.
 - For the company culture question, explain why the candidate is interested in the company and connect it to the role, the job description, or the company's apparent work.
 - If the CV does not provide enough evidence, phrase carefully and avoid pretending the candidate has done something.
@@ -310,11 +422,11 @@ Job Description:
 ${trimmedJD}
 `;
 
-        const parsed = await callOpenAI(prompt, 4200);
+        const parsed = await callOpenAI(prompt, 4600);
 
         parsed.companyName = providedCompany;
 
-        ensureInterviewQuestionCount(parsed, hasCompany, providedCompany);
+        ensureInterviewQuestionStructure(parsed, hasCompany, providedCompany);
 
         if (Array.isArray(parsed.questionsForInterviewer)) {
             parsed.questionsForInterviewer = parsed.questionsForInterviewer.slice(0, 5);
