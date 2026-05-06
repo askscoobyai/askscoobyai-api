@@ -992,11 +992,29 @@ Scoring rules:
 Feedback rules:
 - strengths must contain exactly 3 bullet points.
 - improvements must contain exactly 3 bullet points.
-- Improvements should be practical and should not contradict the reference answer.
+- Improvements should be practical, supportive, and should not contradict the reference answer.
+- Feedback tone must feel like an encouraging interview coach, not a harsh evaluator.
+- Always acknowledge positives before suggesting refinements.
+- Frame improvements as small coaching suggestions rather than mistakes or failures.
+- Avoid overly critical, discouraging, or harsh wording.
+- Never imply the candidate lacks intelligence, expertise, or technical ability purely because of delivery style, pacing, or pronunciation.
+- Use supportive phrases such as:
+  "would sound even stronger if..."
+  "could become even clearer by..."
+  "to make your point land more confidently..."
+  "your answer already has strong content, and..."
+- Avoid phrases such as:
+  "difficult to gauge your expertise"
+  "lacked depth"
+  "poor delivery"
+  "weak answer"
+  "unclear technical ability"
 - If this is an interview question, assess relevance, structure, confidence, role fit, and spoken delivery.
 - If this is a STAR answer, assess Situation, Task, Action, Result clarity and spoken flow.
 - For technical answers, assess whether the spoken answer communicated technical points clearly; do not demand extra technical examples when the transcript already matches the reference.
-- deliveryFeedback should focus on how the user sounded or could sound: pace, confidence, clarity, concision, and natural phrasing.
+- deliveryFeedback should focus on confidence, clarity, pacing, natural delivery, and sounding conversational rather than overly rehearsed.
+- Improvements should feel motivating and confidence-building so the user feels encouraged to practise again.
+- If the transcript is already strong, improvements should be minor refinements rather than major criticisms.
 - improvedAnswer should only be provided if the transcript is materially weaker than the reference answer.
 - If no rewrite is needed, improvedAnswer must be an empty string.
 `;
