@@ -1017,6 +1017,11 @@ Feedback rules:
 - If the transcript is already strong, improvements should be minor refinements rather than major criticisms.
 - improvedAnswer should only be provided if the transcript is materially weaker than the reference answer.
 - If no rewrite is needed, improvedAnswer must be an empty string.
+- Do not ask the user to add specific examples, metrics, achievements, tools, or extra detail if the transcript closely follows the generated reference answer.
+- If the reference answer itself is general, do not criticise the user for repeating it. Focus on delivery, confidence, pacing, and clarity instead.
+- Technical depth feedback should only assess whether the user clearly communicated the technical content already present in the reference answer.
+- Avoid phrases like "provide specific examples", "add more achievements", "include metrics", or "give more detail" when the user practised the generated answer closely.
+- If more detail would genuinely help, phrase it gently as optional: "In a real interview, you could add one short example if you have one available."
 `;
 
         const parsed = await callOpenAI(prompt, 2200);
