@@ -18,6 +18,9 @@ app.use(helmet());
 
 app.use(cors({
     origin(origin, callback) {
+        console.log("Incoming origin:", origin);
+        console.log("Allowed origins:", allowedOrigins);
+
         if (!origin) {
             callback(null, true);
             return;
@@ -28,6 +31,7 @@ app.use(cors({
             return;
         }
 
+        console.error("Blocked by CORS:", origin);
         callback(new Error("Not allowed by CORS"));
     },
     methods: ["POST", "OPTIONS"],
