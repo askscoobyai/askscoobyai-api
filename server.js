@@ -1,3 +1,5 @@
+import OpenAI from "openai";
+
 import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
@@ -82,7 +84,9 @@ app.use(
     ],
     requireApiToken
 );
-
+const openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY
+});
 function stripHtmlAndDangerousText(value) {
     return String(value || "")
         .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, "")
