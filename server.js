@@ -77,14 +77,11 @@ app.use(
         "/generate-interview",
         "/generate-star",
         "/generate-docs",
-        "/generate-practice-feedback"
+        "/generate-practice-feedback",
+        "/generate-question-audio"
     ],
     requireApiToken
 );
-
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY
-});
 
 function stripHtmlAndDangerousText(value) {
     return String(value || "")
@@ -909,6 +906,48 @@ ${trimmedJD}
     }
 });
 
+app.post("/generate-question-audio", async (req, res) => {
+    try {
+        const question =
+            cleanText(req.body?.question).slice(0, 1200);
+
+        if (!question || question.length < 10) {
+            return res.status(400).json({
+                error: "A valid interview question is required."
+            });
+        }
+
+        const audio = await openai.audio.speech.create({
+            model: "gpt-4o-mini-tts",
+            voice: "alloy",
+            input: question,
+            format: "mp3"
+        });
+
+        const buffer = Buffer.from(
+            await audio.arrayBuffer()
+        );
+
+        res.set({
+            "Content-Type": "audio/mpeg",
+            "Content-Length": buffer.length,
+            "Cache-Control": "no-store"
+        });
+
+        res.send(buffer);
+
+    } catch (error) {
+        console.error(
+            "Question Audio Error:",
+            error
+        );
+
+        res.status(500).json({
+            error:
+                "Failed to generate interview question audio."
+        });
+    }
+});
 app.post("/generate-practice-feedback", async (req, res) => {
     try {
         const validation = validatePracticeBody(req);
