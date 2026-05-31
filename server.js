@@ -921,7 +921,7 @@ app.post("/generate-question-audio", async (req, res) => {
 
         const audio = await openai.audio.speech.create({
             model: "gpt-4o-mini-tts",
-            voice: "verse",
+            voice: "sage",
             input: question,
             format: "mp3"
         });
