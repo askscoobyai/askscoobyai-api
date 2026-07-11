@@ -3,7 +3,7 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
-import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 
 dotenv.config();
 
@@ -82,8 +82,8 @@ app.use(
     ],
     requireApiToken
 );
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
+const anthropic = new Anthropic({
+    apiKey: process.env.ANTHROPIC_API_KEY,
     timeout: 60000
 });
 function stripHtmlAndDangerousText(value) {
@@ -338,21 +338,23 @@ function validatePracticeBody(req) {
     return { valid: true };
 }
 
-async function callOpenAI(prompt, maxTokens = 2500) {
-    const completion = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        response_format: { type: "json_object" },
+async function callClaude(prompt, maxTokens = 2500) {
+    const response = await anthropic.messages.create({
+        model: "claude-sonnet-4-6",
+        max_tokens: maxTokens,
+        temperature: 0.25,
         messages: [
             {
                 role: "user",
                 content: prompt
             }
-        ],
-        temperature: 0.25,
-        max_tokens: maxTokens
+        ]
     });
 
-    return JSON.parse(completion.choices[0].message.content.trim());
+    const text = response.content[0].text.trim();
+    // Strip markdown code fences if present
+    const cleaned = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim();
+    return JSON.parse(cleaned);
 }
 
 function buildFallbackIntroQuestion() {
@@ -678,7 +680,7 @@ Job Description:
 ${trimmedJD}
 `;
 
-        const parsed = await callOpenAI(prompt, 4600);
+        const parsed = await callClaude(prompt, 4600);
 
         parsed.companyName = providedCompany;
 
@@ -801,7 +803,7 @@ Job Description:
 ${trimmedJD}
 `;
 
-        const parsed = await callOpenAI(prompt, 5000);
+        const parsed = await callClaude(prompt, 5000);
 
         parsed.companyName = providedCompany;
         parsed.companyInfo = hasCompany ? (parsed.companyInfo || "") : "";
@@ -887,7 +889,7 @@ Job Description:
 ${trimmedJD}
 `;
 
-        const parsed = await callOpenAI(prompt, 2400);
+        const parsed = await callClaude(prompt, 2400);
 
         parsed.companyName = providedCompany;
         parsed.cvImprovementPreview = Array.isArray(parsed.cvImprovementPreview)
@@ -920,24 +922,11 @@ app.post("/generate-question-audio", async (req, res) => {
             });
         }
 
-        const audio = await openai.audio.speech.create({
-            model: "gpt-4o-mini-tts",
-            voice: "sage",
-            input: question,
-            format: "mp3"
+        // Claude does not have a TTS API — return 501 so the extension
+        // falls back to the browser's built-in speech synthesis automatically
+        return res.status(501).json({
+            error: "Audio generation is handled by the browser."
         });
-
-        const buffer = Buffer.from(
-            await audio.arrayBuffer()
-        );
-
-        res.set({
-            "Content-Type": "audio/mpeg",
-            "Content-Length": buffer.length,
-            "Cache-Control": "no-store"
-        });
-
-        res.send(buffer);
 
     } catch (error) {
         console.error(
@@ -1070,7 +1059,7 @@ Feedback rules:
 - If more detail would genuinely help, phrase it gently as optional: "In a real interview, you could add one short example if you have one available."
 `;
 
-        const parsed = await callOpenAI(prompt, 2200);
+        const parsed = await callClaude(prompt, 2200);
 
         parsed.overallScore = Number(parsed.overallScore) || 0;
         parsed.strengths = Array.isArray(parsed.strengths) ? parsed.strengths.slice(0, 3) : [];
