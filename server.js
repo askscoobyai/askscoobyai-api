@@ -338,9 +338,11 @@ function validatePracticeBody(req) {
     return { valid: true };
 }
 
-async function callClaude(prompt, maxTokens = 2500) {
+// claude-haiku-4-5 — fast, for interview Q&A and STAR answers
+// claude-sonnet-4-6 — quality, for cover letter and practice feedback
+async function callClaude(prompt, maxTokens = 2500, model = "claude-haiku-4-5-20251001") {
     const response = await anthropic.messages.create({
-        model: "claude-sonnet-4-6",
+        model: model,
         max_tokens: maxTokens,
         temperature: 0.25,
         messages: [
@@ -889,7 +891,7 @@ Job Description:
 ${trimmedJD}
 `;
 
-        const parsed = await callClaude(prompt, 2400);
+        const parsed = await callClaude(prompt, 2400, "claude-sonnet-4-6");
 
         parsed.companyName = providedCompany;
         parsed.cvImprovementPreview = Array.isArray(parsed.cvImprovementPreview)
@@ -1059,7 +1061,7 @@ Feedback rules:
 - If more detail would genuinely help, phrase it gently as optional: "In a real interview, you could add one short example if you have one available."
 `;
 
-        const parsed = await callClaude(prompt, 2200);
+        const parsed = await callClaude(prompt, 2200, "claude-sonnet-4-6");
 
         parsed.overallScore = Number(parsed.overallScore) || 0;
         parsed.strengths = Array.isArray(parsed.strengths) ? parsed.strengths.slice(0, 3) : [];
