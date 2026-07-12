@@ -682,7 +682,7 @@ Job Description:
 ${trimmedJD}
 `;
 
-        const parsed = await callClaude(prompt, 4600);
+        const parsed = await callClaude(prompt, 3200);
 
         parsed.companyName = providedCompany;
 
@@ -805,7 +805,7 @@ Job Description:
 ${trimmedJD}
 `;
 
-        const parsed = await callClaude(prompt, 5000);
+        const parsed = await callClaude(prompt, 3500);
 
         parsed.companyName = providedCompany;
         parsed.companyInfo = hasCompany ? (parsed.companyInfo || "") : "";
