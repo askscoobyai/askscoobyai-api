@@ -658,9 +658,11 @@ Technical question rules:
 Answer rules:
 - Each answer should be 4-8 lines, approximately 70-110 words.
 - Each answer must be written in the first person.
-- For CV-specific questions, answer using CV evidence where possible.
-- For questions 5-8, give concrete steps, checks, methods, trade-offs, or troubleshooting logic.
-- For behavioural questions, use a practical workplace example or careful transferable approach.
+- Question 1 (self-introduction) must be 60-70 words maximum. It should be punchy, confident and naturally conversational — not a CV recitation.
+- For CV-specific questions, answer using CV evidence where possible. Reference specific employers, tools, and outcomes from the CV.
+- For questions 5-8, give concrete steps, checks, methods, trade-offs, or troubleshooting logic. Where the CV mentions specific tools (e.g. Databricks, Snowflake, Power BI, Alteryx), reference them directly in the answer rather than giving a generic response.
+- For behavioural questions, use a practical workplace example grounded in the CV. Name the employer and context where possible.
+- Where the CV includes quantified results (percentages, time savings, scale), use them. Where it does not, express results in relative terms (e.g. "reduced from monthly to weekly", "cut development time by approximately a third").
 - Every answer must end with one short, natural closing line.
 - Do not reuse the same closing line.
 
@@ -786,10 +788,24 @@ Rules:
 - Infer seniority from the CV and job description.
 - Senior candidates should show ownership, strategy, stakeholder alignment, risk management, mentoring, and impact.
 - Junior candidates should show learning agility, reliability, execution, curiosity, and collaboration.
-- Each STAR answer must include:
-  - whatNotToSay: short warning, max 25 words.
-  - stealThisPhrase: short interview-ready phrase, max 18 words.
-- Use different stealThisPhrase wording for each answer.
+
+Result rules:
+- Where the CV includes specific figures or percentages, use them in the Result field.
+- Where no figures exist, express the result in concrete relative terms — e.g. "reduced from monthly to weekly reporting", "cut dashboard development time by approximately a third", "enabled same-day rather than next-day decisions".
+- Never leave the Result as vague or generic — every Result must convey a tangible, specific outcome.
+
+Steal this phrase rules:
+- Each stealThisPhrase must be punchy, memorable, and specific to that STAR answer — not a generic LinkedIn summary.
+- It should capture the most impressive or distinctive element of the answer in a way that would stand out in an interview room.
+- Maximum 18 words.
+- Use different wording for each answer.
+- Good example: "I built the model in parallel with the live system — zero downtime, zero reporting gaps."
+- Bad example: "I designed a scalable data model that improved stakeholder adoption." (too generic)
+
+What not to say rules:
+- Each whatNotToSay must be a specific, practical warning relevant to that exact STAR answer.
+- Maximum 25 words.
+- Focus on the most common mistake a candidate would make when telling this specific story.
 
 ${weakInputInstruction}
 
