@@ -792,6 +792,7 @@ Rules:
 Result rules:
 - Where the CV includes specific figures or percentages, use them in the Result field.
 - Where no figures exist, express the result in concrete relative terms — e.g. "reduced from monthly to weekly reporting", "cut dashboard development time by approximately a third", "enabled same-day rather than next-day decisions".
+- Never use the word "measurably" or phrases like "increased measurably" or "improved measurably" — these are vague and unconvincing. Instead say something specific: "across 3 business units", "within 6 weeks", "for a team of 12", "across EU and US markets".
 - Never leave the Result as vague or generic — every Result must convey a tangible, specific outcome.
 
 Steal this phrase rules:
