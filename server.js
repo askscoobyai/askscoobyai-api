@@ -895,6 +895,8 @@ Rules:
 - If company is not provided, write without naming a company.
 - CV improvement points must be specific, actionable, and connected to job requirements.
 - Where possible, include an example rewritten bullet.
+- When referencing employers from the CV in the cover letter, always use the full employer name with correct prefix — e.g. "At E.On Energy" not "On Energy", "At Adidas" not "Adidas". Never drop the "At" prefix when starting a sentence with an employer name.
+- Where a rewritten CV bullet is suggested, put the suggested text inside single quotes so it can be visually highlighted for the user.
 
 ${weakInputInstruction}
 
