@@ -4,10 +4,88 @@ import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import Anthropic from "@anthropic-ai/sdk";
+import Stripe from "stripe";
+import crypto from "crypto";
 
 dotenv.config();
 
 const app = express();
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+// ── Supabase (service role — full access, never exposed to the extension) ──
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+function supabaseHeaders(extra = {}) {
+    return {
+        "Content-Type": "application/json",
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        "Prefer": "return=representation",
+        ...extra
+    };
+}
+
+async function supabaseFetch(path, options = {}) {
+    const res = await fetch(`${SUPABASE_URL}${path}`, {
+        ...options,
+        headers: supabaseHeaders(options.headers)
+    });
+    const text = await res.text();
+    let json;
+    try { json = text ? JSON.parse(text) : null; } catch { json = text; }
+    if (!res.ok) {
+        throw new Error(typeof json === "object" ? JSON.stringify(json) : String(json));
+    }
+    return json;
+}
+
+async function supabaseRpc(fnName, params) {
+    return supabaseFetch(`/rest/v1/rpc/${fnName}`, {
+        method: "POST",
+        body: JSON.stringify(params)
+    });
+}
+
+// ── Verify the caller's Google identity token, derive their email server-side ──
+// (never trust an email the client sends in the body — always derive it from
+// a token Google itself just vouched for)
+async function verifyGoogleUser(req, res, next) {
+    const authHeader = req.get("authorization") || "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+
+    if (!token) {
+        return res.status(401).json({ error: "Missing Google auth token." });
+    }
+
+    try {
+        const googleRes = await fetch(
+            `https://www.googleapis.com/oauth2/v2/userinfo?access_token=${encodeURIComponent(token)}`
+        );
+        if (!googleRes.ok) {
+            return res.status(401).json({ error: "Invalid or expired Google token." });
+        }
+        const profile = await googleRes.json();
+        if (!profile.email) {
+            return res.status(401).json({ error: "Google token did not return an email." });
+        }
+        req.googleUser = {
+            email: profile.email,
+            name: profile.name || "",
+            given: profile.given_name || "",
+            photo: profile.picture || ""
+        };
+        next();
+    } catch (err) {
+        console.error("Google token verification error:", err);
+        res.status(401).json({ error: "Could not verify Google token." });
+    }
+}
+
+function getJobFingerprint(jd, company) {
+    const normalized = String(jd || "").trim().toLowerCase() + "|" + String(company || "").trim().toLowerCase();
+    return crypto.createHash("sha256").update(normalized).digest("hex").slice(0, 40);
+}
 
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
     .split(",")
@@ -37,6 +115,47 @@ app.use(cors({
     methods: ["POST", "OPTIONS"],
     allowedHeaders: ["Content-Type", "x-api-token"]
 }));
+
+// ── Stripe webhook — must be registered BEFORE express.json() since it needs
+// the raw, unparsed request body to verify Stripe's signature. Not behind
+// requireApiToken/verifyGoogleUser — Stripe itself is the caller, authenticated
+// via the webhook signature instead.
+app.post("/stripe-webhook", express.raw({ type: "application/json" }), async (req, res) => {
+    let event;
+
+    try {
+        const signature = req.get("stripe-signature");
+        event = stripe.webhooks.constructEvent(req.body, signature, process.env.STRIPE_WEBHOOK_SECRET);
+    } catch (err) {
+        console.error("Stripe webhook signature verification failed:", err.message);
+        return res.status(400).send(`Webhook Error: ${err.message}`);
+    }
+
+    if (event.type === "checkout.session.completed") {
+        const session = event.data.object;
+        const email = session.metadata?.email;
+        const credits = parseInt(session.metadata?.credits || "0", 10);
+
+        if (email && credits > 0) {
+            try {
+                await supabaseRpc("add_credits", {
+                    p_email: email,
+                    p_amount: credits,
+                    p_type: "stripe_purchase",
+                    p_stripe_session_id: session.id
+                });
+                console.log(`Stripe: added ${credits} credits to ${email} (session ${session.id})`);
+            } catch (err) {
+                console.error("Stripe webhook: failed to add credits:", err);
+                // Still return 200 below — Stripe will retry on non-2xx, but the
+                // failure here is on our Supabase side, not something a retry
+                // fixes automatically. Logged for manual follow-up.
+            }
+        }
+    }
+
+    res.json({ received: true });
+});
 
 app.use(express.json({ limit: "1mb" }));
 
@@ -82,6 +201,10 @@ app.use(
     ],
     requireApiToken
 );
+
+// These three cost a credit, so we need to know WHO is calling — verified
+// against Google, never trusted from the request body.
+app.use(["/generate-interview", "/generate-star", "/generate-docs"], verifyGoogleUser);
 const anthropic = new Anthropic({
     apiKey: process.env.ANTHROPIC_API_KEY,
     timeout: 60000
@@ -592,6 +715,23 @@ app.post("/generate-interview", async (req, res) => {
         const hasCompany = providedCompany.length > 1;
         const targetInterviewQuestionCount = hasCompany ? 12 : 11;
 
+        // ── Atomic credit charge — 1 credit unlocks all 3 sections for this
+        // exact job. Charged once here; the other two routes see the same
+        // fingerprint already charged and proceed for free.
+        const jobFingerprint = getJobFingerprint(trimmedJD, providedCompany);
+        const chargeRows = await supabaseRpc("charge_credit_for_job", {
+            p_email: req.googleUser.email,
+            p_job_fingerprint: jobFingerprint
+        });
+        const charge = Array.isArray(chargeRows) ? chargeRows[0] : chargeRows;
+
+        if (!charge || (!charge.charged && !charge.already_unlocked)) {
+            return res.status(402).json({
+                error: "No credits remaining. Please buy more credits to continue.",
+                noCredits: true
+            });
+        }
+
         const weakInputInstruction = validation.weak
             ? `
 Input detail note:
@@ -698,6 +838,8 @@ ${trimmedJD}
             parsed.inputNote = "Tip: Adding more CV or job description detail can improve personalisation.";
         }
 
+        parsed.creditsRemaining = charge.credits;
+
         res.json(parsed);
 
     } catch (error) {
@@ -731,6 +873,21 @@ app.post("/generate-star", async (req, res) => {
         const { trimmedCV, trimmedJD } = trimInputs(cv, jd);
         const providedCompany = getCompany(company);
         const hasCompany = providedCompany.length > 1;
+
+        // ── Atomic credit charge — same job-fingerprint scheme as /generate-interview.
+        const jobFingerprint = getJobFingerprint(trimmedJD, providedCompany);
+        const chargeRows = await supabaseRpc("charge_credit_for_job", {
+            p_email: req.googleUser.email,
+            p_job_fingerprint: jobFingerprint
+        });
+        const charge = Array.isArray(chargeRows) ? chargeRows[0] : chargeRows;
+
+        if (!charge || (!charge.charged && !charge.already_unlocked)) {
+            return res.status(402).json({
+                error: "No credits remaining. Please buy more credits to continue.",
+                noCredits: true
+            });
+        }
 
         const weakInputInstruction = validation.weak
             ? `
@@ -833,6 +990,8 @@ ${trimmedJD}
             parsed.inputNote = "Tip: Adding more CV or job description detail can improve personalisation.";
         }
 
+        parsed.creditsRemaining = charge.credits;
+
         res.json(parsed);
 
     } catch (error) {
@@ -865,6 +1024,21 @@ app.post("/generate-docs", async (req, res) => {
 
         const { trimmedCV, trimmedJD } = trimInputs(cv, jd);
         const providedCompany = getCompany(company);
+
+        // ── Atomic credit charge — same job-fingerprint scheme as the other two routes.
+        const jobFingerprint = getJobFingerprint(trimmedJD, providedCompany);
+        const chargeRows = await supabaseRpc("charge_credit_for_job", {
+            p_email: req.googleUser.email,
+            p_job_fingerprint: jobFingerprint
+        });
+        const charge = Array.isArray(chargeRows) ? chargeRows[0] : chargeRows;
+
+        if (!charge || (!charge.charged && !charge.already_unlocked)) {
+            return res.status(402).json({
+                error: "No credits remaining. Please buy more credits to continue.",
+                noCredits: true
+            });
+        }
 
         const weakInputInstruction = validation.weak
             ? `
@@ -920,6 +1094,8 @@ ${trimmedJD}
         if (validation.weak) {
             parsed.inputNote = "Tip: Adding more CV or job description detail can improve personalisation.";
         }
+
+        parsed.creditsRemaining = charge.credits;
 
         res.json(parsed);
 
@@ -1102,6 +1278,222 @@ Feedback rules:
         res.status(500).json({
             error: "Failed to generate practice feedback."
         });
+    }
+});
+
+// ============================================================
+// User, session, and payment endpoints — all backend-mediated.
+// The extension never talks to Supabase directly any more.
+// ============================================================
+
+// ── Get-or-create user on sign-in. Grants 1 free credit on first creation. ──
+app.post("/auth/sync-user", requireApiToken, verifyGoogleUser, async (req, res) => {
+    try {
+        const { email, name, given, photo } = req.googleUser;
+
+        const existing = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(email)}&select=*`);
+        if (existing && existing.length > 0) {
+            return res.json({ success: true, user: existing[0] });
+        }
+
+        const created = await supabaseFetch(`/rest/v1/users`, {
+            method: "POST",
+            body: JSON.stringify({
+                google_id: email,
+                email,
+                name,
+                given_name: given,
+                photo,
+                credits: 1
+            })
+        });
+        const newUser = Array.isArray(created) ? created[0] : created;
+
+        try {
+            await supabaseFetch(`/rest/v1/credit_transactions`, {
+                method: "POST",
+                body: JSON.stringify({ user_id: newUser.id, amount: 1, type: "signup_bonus" })
+            });
+        } catch (ledgerErr) {
+            console.error("sync-user: ledger log failed (non-fatal):", ledgerErr);
+        }
+
+        res.json({ success: true, user: newUser });
+    } catch (err) {
+        console.error("sync-user error:", err);
+        res.status(500).json({ error: "Could not sync user." });
+    }
+});
+
+// ── Get current credit balance ──
+app.post("/credits", requireApiToken, verifyGoogleUser, async (req, res) => {
+    try {
+        const rows = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(req.googleUser.email)}&select=credits`);
+        const credits = rows && rows.length > 0 ? rows[0].credits : 0;
+        res.json({ success: true, credits });
+    } catch (err) {
+        console.error("credits error:", err);
+        res.status(500).json({ error: "Could not fetch credits." });
+    }
+});
+
+// ── List all job sessions for the signed-in user ──
+app.post("/sessions/list", requireApiToken, verifyGoogleUser, async (req, res) => {
+    try {
+        const users = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(req.googleUser.email)}&select=id`);
+        if (!users || users.length === 0) return res.json({ success: true, sessions: [] });
+        const userId = users[0].id;
+        const sessions = await supabaseFetch(`/rest/v1/job_sessions?user_id=eq.${userId}&order=created_at.desc&select=*`);
+        res.json({ success: true, sessions: sessions || [] });
+    } catch (err) {
+        console.error("sessions list error:", err);
+        res.status(500).json({ error: "Could not fetch sessions." });
+    }
+});
+
+// ── Create or update a job session ──
+app.post("/sessions/save", requireApiToken, verifyGoogleUser, async (req, res) => {
+    try {
+        const {
+            jd, job_title, company,
+            generated_interview, generated_star, generated_docs, credit_used,
+            answers_interview, answers_star, answers_docs
+        } = req.body || {};
+
+        const users = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(req.googleUser.email)}&select=id`);
+        if (!users || users.length === 0) return res.status(404).json({ error: "User not found." });
+        const userId = users[0].id;
+
+        const jdSnippet = String(jd || "").slice(0, 500);
+
+        const existing = await supabaseFetch(
+            `/rest/v1/job_sessions?user_id=eq.${userId}&jd_snippet=eq.${encodeURIComponent(jdSnippet)}&select=*`
+        );
+
+        if (existing && existing.length > 0) {
+            const session = existing[0];
+            const updated = await supabaseFetch(`/rest/v1/job_sessions?id=eq.${session.id}`, {
+                method: "PATCH",
+                body: JSON.stringify({
+                    generated_interview: generated_interview ?? session.generated_interview,
+                    generated_star: generated_star ?? session.generated_star,
+                    generated_docs: generated_docs ?? session.generated_docs,
+                    credit_used: credit_used ?? session.credit_used,
+                    jd_full: jd || session.jd_full || "",
+                    answers_interview: answers_interview !== undefined ? answers_interview : session.answers_interview,
+                    answers_star: answers_star !== undefined ? answers_star : session.answers_star,
+                    answers_docs: answers_docs !== undefined ? answers_docs : session.answers_docs
+                })
+            });
+            return res.json({ success: true, session: Array.isArray(updated) ? updated[0] : updated });
+        }
+
+        const created = await supabaseFetch(`/rest/v1/job_sessions`, {
+            method: "POST",
+            body: JSON.stringify({
+                user_id: userId,
+                job_title: job_title || "",
+                company: company || "",
+                jd_snippet: jdSnippet,
+                jd_full: jd || "",
+                generated_interview: generated_interview || false,
+                generated_star: generated_star || false,
+                generated_docs: generated_docs || false,
+                credit_used: credit_used || false,
+                status: "prepping",
+                answers_interview: answers_interview || null,
+                answers_star: answers_star || null,
+                answers_docs: answers_docs || null
+            })
+        });
+        res.json({ success: true, session: Array.isArray(created) ? created[0] : created });
+    } catch (err) {
+        console.error("session save error:", err);
+        res.status(500).json({ error: "Could not save session." });
+    }
+});
+
+// ── Verify a session belongs to the calling user before letting them touch it ──
+async function assertSessionOwnership(sessionId, email) {
+    const rows = await supabaseFetch(
+        `/rest/v1/job_sessions?id=eq.${sessionId}&select=id,users!inner(email)&users.email=eq.${encodeURIComponent(email)}`
+    );
+    return Array.isArray(rows) && rows.length > 0;
+}
+
+// ── Move a session between kanban columns ──
+app.post("/sessions/move", requireApiToken, verifyGoogleUser, async (req, res) => {
+    try {
+        const { sessionId, status } = req.body || {};
+        if (!sessionId || !["prepping", "applied", "done"].includes(status)) {
+            return res.status(400).json({ error: "Invalid request." });
+        }
+
+        const owned = await assertSessionOwnership(sessionId, req.googleUser.email);
+        if (!owned) return res.status(403).json({ error: "Not authorised." });
+
+        await supabaseFetch(`/rest/v1/job_sessions?id=eq.${sessionId}`, {
+            method: "PATCH",
+            body: JSON.stringify({ status })
+        });
+        res.json({ success: true });
+    } catch (err) {
+        console.error("session move error:", err);
+        res.status(500).json({ error: "Could not update session." });
+    }
+});
+
+// ── Delete a session ──
+app.post("/sessions/delete", requireApiToken, verifyGoogleUser, async (req, res) => {
+    try {
+        const { sessionId } = req.body || {};
+        if (!sessionId) return res.status(400).json({ error: "Invalid request." });
+
+        const owned = await assertSessionOwnership(sessionId, req.googleUser.email);
+        if (!owned) return res.status(403).json({ error: "Not authorised." });
+
+        await supabaseFetch(`/rest/v1/job_sessions?id=eq.${sessionId}`, { method: "DELETE" });
+        res.json({ success: true });
+    } catch (err) {
+        console.error("session delete error:", err);
+        res.status(500).json({ error: "Could not delete session." });
+    }
+});
+
+// ── Stripe Checkout ──
+const CREDIT_TIERS = {
+    try: { priceEnv: "STRIPE_PRICE_TRY", credits: 2 },
+    starter: { priceEnv: "STRIPE_PRICE_STARTER", credits: 10 },
+    popular: { priceEnv: "STRIPE_PRICE_POPULAR", credits: 25 }
+};
+
+app.post("/create-checkout-session", requireApiToken, verifyGoogleUser, async (req, res) => {
+    try {
+        const { tier } = req.body || {};
+        const tierConfig = CREDIT_TIERS[tier];
+        const priceId = tierConfig && process.env[tierConfig.priceEnv];
+
+        if (!priceId) {
+            return res.status(400).json({ error: "Invalid pricing tier." });
+        }
+
+        const session = await stripe.checkout.sessions.create({
+            mode: "payment",
+            payment_method_types: ["card"],
+            line_items: [{ price: priceId, quantity: 1 }],
+            customer_email: req.googleUser.email,
+            success_url: `chrome-extension://${process.env.EXTENSION_ID}/dashboard.html?checkout=success`,
+            cancel_url: `chrome-extension://${process.env.EXTENSION_ID}/dashboard.html?checkout=cancelled`,
+            metadata: {
+                email: req.googleUser.email,
+                credits: String(tierConfig.credits)
+            }
+        });
+
+        res.json({ success: true, url: session.url });
+    } catch (err) {
+        console.error("checkout session error:", err);
+        res.status(500).json({ error: "Could not start checkout." });
     }
 });
 
