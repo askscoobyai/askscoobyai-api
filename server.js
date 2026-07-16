@@ -116,7 +116,7 @@ app.use(cors({
         callback(new Error("Not allowed by CORS"));
     },
     methods: ["POST", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "x-api-token"]
+    allowedHeaders: ["Content-Type", "x-api-token", "Authorization"]
 }));
 
 // ── Stripe webhook — must be registered BEFORE express.json() since it needs
