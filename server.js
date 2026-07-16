@@ -10,7 +10,10 @@ import crypto from "crypto";
 dotenv.config();
 
 const app = express();
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
+if (!stripe) {
+    console.warn("⚠️ STRIPE_SECRET_KEY not set — payment routes will return 503 until it's configured. Everything else still works.");
+}
 
 // ── Supabase (service role — full access, never exposed to the extension) ──
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -121,6 +124,8 @@ app.use(cors({
 // requireApiToken/verifyGoogleUser — Stripe itself is the caller, authenticated
 // via the webhook signature instead.
 app.post("/stripe-webhook", express.raw({ type: "application/json" }), async (req, res) => {
+    if (!stripe) return res.status(503).json({ error: "Payments are not configured yet." });
+
     let event;
 
     try {
@@ -1468,6 +1473,8 @@ const CREDIT_TIERS = {
 };
 
 app.post("/create-checkout-session", requireApiToken, verifyGoogleUser, async (req, res) => {
+    if (!stripe) return res.status(503).json({ error: "Payments are not configured yet." });
+
     try {
         const { tier } = req.body || {};
         const tierConfig = CREDIT_TIERS[tier];
