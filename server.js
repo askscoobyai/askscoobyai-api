@@ -1489,8 +1489,8 @@ app.post("/create-checkout-session", requireApiToken, verifyGoogleUser, async (r
             payment_method_types: ["card"],
             line_items: [{ price: priceId, quantity: 1 }],
             customer_email: req.googleUser.email,
-            success_url: `chrome-extension://${process.env.EXTENSION_ID}/dashboard.html?checkout=success`,
-            cancel_url: `chrome-extension://${process.env.EXTENSION_ID}/dashboard.html?checkout=cancelled`,
+            success_url: `https://askscoobyai-api.onrender.com/payment-success`,
+            cancel_url: `https://askscoobyai-api.onrender.com/payment-cancelled`,
             metadata: {
                 email: req.googleUser.email,
                 credits: String(tierConfig.credits)
@@ -1502,6 +1502,29 @@ app.post("/create-checkout-session", requireApiToken, verifyGoogleUser, async (r
         console.error("checkout session error:", err);
         res.status(500).json({ error: "Could not start checkout." });
     }
+});
+
+// ── Simple post-checkout confirmation pages ──
+// Stripe's success_url/cancel_url need a real https:// URL — chrome-extension://
+// isn't a supported redirect target, so we host a minimal confirmation page here
+// instead. The actual credit grant already happened via the webhook by this point;
+// this page is purely a "you're done, go back" message for the user.
+app.get("/payment-success", (req, res) => {
+    res.send(`<!DOCTYPE html><html><head><title>Payment successful</title>
+    <style>body{font-family:-apple-system,sans-serif;background:#0f1117;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center;}
+    .box{max-width:380px;padding:24px;} h1{color:#4ade80;} p{color:#9ca3af;line-height:1.5;}</style></head>
+    <body><div class="box"><h1>✓ Payment successful</h1>
+    <p>Your credits have been added to your AskScoobyAI account. You can close this tab and return to the extension.</p>
+    </div></body></html>`);
+});
+
+app.get("/payment-cancelled", (req, res) => {
+    res.send(`<!DOCTYPE html><html><head><title>Payment cancelled</title>
+    <style>body{font-family:-apple-system,sans-serif;background:#0f1117;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center;}
+    .box{max-width:380px;padding:24px;} h1{color:#facc15;} p{color:#9ca3af;line-height:1.5;}</style></head>
+    <body><div class="box"><h1>Payment cancelled</h1>
+    <p>No charge was made. You can close this tab and return to the extension to try again.</p>
+    </div></body></html>`);
 });
 
 const PORT = process.env.PORT || 3000;
