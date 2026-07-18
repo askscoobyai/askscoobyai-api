@@ -1772,6 +1772,8 @@ ${sessionSummaries}
 
 Analyze this history and identify genuine patterns across sessions — not just a single session's feedback. Be specific, encouraging, and constructive. Never harsh or critical in tone — this is a supportive coach, not a critic.
 
+Important constraint for the action plan: only suggest things achievable using AskScoobyAI itself (e.g. "redo this practice session focusing on X," "review your past feedback for Y," "try editing your transcript to tighten up Z before your next attempt") or general practice habits that don't assume external tools or devices. Do NOT suggest recording on a phone, using outside apps, or anything requiring equipment or software outside of what a job seeker already has just by using this product.
+
 Return ONLY this exact JSON structure, no markdown, no preamble:
 {
   "trendAnalysis": "2-3 sentences describing how their scores/skills have changed across sessions — be specific about direction (improving, plateauing, fluctuating) and which areas.",
