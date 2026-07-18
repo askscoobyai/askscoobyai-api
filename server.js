@@ -1298,10 +1298,17 @@ Feedback rules:
                             user_id: users[0].id,
                             company: safeCompany || null,
                             context_type: safeContextType || null,
+                            question: safeQuestion || null,
                             overall_score: parsed.overallScore,
                             structure_score: parsed.structureScore,
                             technical_depth_score: parsed.technicalDepthScore,
-                            delivery_score: parsed.deliveryScore
+                            delivery_score: parsed.deliveryScore,
+                            summary_feedback: parsed.summaryFeedback || null,
+                            strengths: parsed.strengths || null,
+                            improvements: parsed.improvements || null,
+                            structure_feedback: parsed.structureFeedback || null,
+                            technical_depth_feedback: parsed.technicalDepthFeedback || null,
+                            delivery_feedback: parsed.deliveryFeedback || null
                         })
                     });
                 });
