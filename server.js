@@ -1299,6 +1299,8 @@ Feedback rules:
                             company: safeCompany || null,
                             context_type: safeContextType || null,
                             question: safeQuestion || null,
+                            transcript: safeTranscript || null,
+                            expected_answer: safeExpectedAnswer || null,
                             overall_score: parsed.overallScore,
                             structure_score: parsed.structureScore,
                             technical_depth_score: parsed.technicalDepthScore,
