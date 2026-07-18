@@ -1686,7 +1686,128 @@ app.get("/payment-cancelled", (req, res) => {
     </div></body></html>`);
 });
 
+// ── Scooby Coach — AI-generated cross-session coaching analysis ──
+const SCOOBY_COACH_MIN_SESSIONS = 5;
+
+// Free — just checks unlock status and returns the last cached analysis,
+// if one exists. Viewing/revisiting never costs a credit.
+app.post("/scooby-coach/status", requireApiToken, verifyGoogleUser, async (req, res) => {
+    try {
+        const users = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(req.googleUser.email)}&select=id`);
+        if (!users || users.length === 0) {
+            return res.json({ success: true, sessionCount: 0, unlocked: false, latest: null });
+        }
+        const userId = users[0].id;
+
+        const sessions = await supabaseFetch(`/rest/v1/practice_sessions?user_id=eq.${userId}&select=id`);
+        const sessionCount = (sessions || []).length;
+
+        const latestRows = await supabaseFetch(
+            `/rest/v1/scooby_coach_analyses?user_id=eq.${userId}&order=created_at.desc&limit=1&select=*`
+        );
+        const latest = latestRows && latestRows.length > 0 ? latestRows[0] : null;
+
+        res.json({
+            success: true,
+            sessionCount,
+            unlocked: sessionCount >= SCOOBY_COACH_MIN_SESSIONS,
+            minSessions: SCOOBY_COACH_MIN_SESSIONS,
+            latest
+        });
+    } catch (err) {
+        console.error("scooby-coach status error:", err);
+        res.status(500).json({ error: "Could not check Scooby Coach status." });
+    }
+});
+
+// Costs 1 credit — generates a fresh cross-session analysis.
+app.post("/scooby-coach/generate", requireApiToken, verifyGoogleUser, async (req, res) => {
+    try {
+        const users = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(req.googleUser.email)}&select=id`);
+        if (!users || users.length === 0) {
+            return res.status(404).json({ error: "User not found." });
+        }
+        const userId = users[0].id;
+
+        const sessions = await supabaseFetch(
+            `/rest/v1/practice_sessions?user_id=eq.${userId}&order=created_at.asc&select=*`
+        );
+        const allSessions = sessions || [];
+
+        if (allSessions.length < SCOOBY_COACH_MIN_SESSIONS) {
+            return res.status(400).json({
+                error: `Complete at least ${SCOOBY_COACH_MIN_SESSIONS} practice sessions to unlock Scooby Coach.`
+            });
+        }
+
+        // Atomic credit spend
+        const spendRows = await supabaseRpc("spend_credit", {
+            p_email: req.googleUser.email,
+            p_type: "coach_analysis"
+        });
+        const spend = Array.isArray(spendRows) ? spendRows[0] : spendRows;
+
+        if (!spend || !spend.spent) {
+            return res.status(402).json({
+                error: "No credits remaining. Please buy more credits to continue.",
+                noCredits: true
+            });
+        }
+
+        // Cap to the most recent 20 sessions to keep the prompt bounded for
+        // very frequent practicers, while still covering plenty of history.
+        const recentSessions = allSessions.slice(-20);
+
+        const sessionSummaries = recentSessions.map((s, i) => {
+            const date = new Date(s.created_at).toISOString().slice(0, 10);
+            return `Session ${i + 1} (${date}) — Overall: ${s.overall_score}/10, Structure: ${s.structure_score}/10, Technical Depth: ${s.technical_depth_score}/10, Delivery: ${s.delivery_score}/10
+Summary: ${s.summary_feedback || "N/A"}
+Improvements noted: ${Array.isArray(s.improvements) ? s.improvements.join(" | ") : "N/A"}`;
+        }).join("\n\n");
+
+        const prompt = `You are Scooby Coach, an encouraging AI interview coach reviewing a job seeker's mock interview practice history.
+
+Practice history (oldest to newest):
+${sessionSummaries}
+
+Analyze this history and identify genuine patterns across sessions — not just a single session's feedback. Be specific, encouraging, and constructive. Never harsh or critical in tone — this is a supportive coach, not a critic.
+
+Return ONLY this exact JSON structure, no markdown, no preamble:
+{
+  "trendAnalysis": "2-3 sentences describing how their scores/skills have changed across sessions — be specific about direction (improving, plateauing, fluctuating) and which areas.",
+  "recurringThemes": ["2-4 specific patterns noticed repeatedly across multiple sessions' feedback, phrased constructively"],
+  "actionPlan": ["3-4 concrete, specific next steps tailored to what was found, phrased encouragingly"]
+}`;
+
+        const parsed = await callClaude(prompt, 1200, "claude-sonnet-4-6");
+
+        const saved = await supabaseFetch(`/rest/v1/scooby_coach_analyses`, {
+            method: "POST",
+            body: JSON.stringify({
+                user_id: userId,
+                sessions_analyzed: recentSessions.length,
+                trend_analysis: parsed.trendAnalysis || null,
+                recurring_themes: parsed.recurringThemes || null,
+                action_plan: parsed.actionPlan || null
+            })
+        });
+
+        const savedRow = Array.isArray(saved) ? saved[0] : saved;
+
+        res.json({
+            success: true,
+            latest: savedRow,
+            creditsRemaining: spend.credits
+        });
+    } catch (err) {
+        console.error("scooby-coach generate error:", err);
+        res.status(500).json({ error: "Could not generate Scooby Coach analysis." });
+    }
+});
+
 const PORT = process.env.PORT || 3000;
+
+
 
 app.listen(PORT, "0.0.0.0", () => {
     console.log(`AskScoobyAI API running on port ${PORT}`);
