@@ -1703,16 +1703,18 @@ app.post("/scooby-coach/status", requireApiToken, verifyGoogleUser, async (req, 
         const sessionCount = (sessions || []).length;
 
         const latestRows = await supabaseFetch(
-            `/rest/v1/scooby_coach_analyses?user_id=eq.${userId}&order=created_at.desc&limit=1&select=*`
+            `/rest/v1/scooby_coach_analyses?user_id=eq.${userId}&order=created_at.desc&select=*`
         );
-        const latest = latestRows && latestRows.length > 0 ? latestRows[0] : null;
+        const history = latestRows || [];
+        const latest = history.length > 0 ? history[0] : null;
 
         res.json({
             success: true,
             sessionCount,
             unlocked: sessionCount >= SCOOBY_COACH_MIN_SESSIONS,
             minSessions: SCOOBY_COACH_MIN_SESSIONS,
-            latest
+            latest,
+            history
         });
     } catch (err) {
         console.error("scooby-coach status error:", err);
