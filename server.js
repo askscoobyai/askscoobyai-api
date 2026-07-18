@@ -210,6 +210,10 @@ app.use(
 // These three cost a credit, so we need to know WHO is calling — verified
 // against Google, never trusted from the request body.
 app.use(["/generate-interview", "/generate-star", "/generate-docs"], verifyGoogleUser);
+
+// Practice feedback doesn't cost a credit, but we still need to know who's
+// practicing so we can save their score history for My Progress.
+app.use(["/generate-practice-feedback"], verifyGoogleUser);
 const anthropic = new Anthropic({
     apiKey: process.env.ANTHROPIC_API_KEY,
     timeout: 60000
@@ -1180,6 +1184,9 @@ Return ONLY valid JSON. Do not include markdown or code fences.
 Use this exact JSON structure:
 {
   "overallScore": 0,
+  "structureScore": 0,
+  "technicalDepthScore": 0,
+  "deliveryScore": 0,
   "summaryFeedback": "string",
   "strengths": ["string"],
   "improvements": ["string"],
@@ -1221,6 +1228,7 @@ Feedback philosophy:
 
 Scoring rules:
 - Score from 1 to 10.
+- Provide overallScore plus three separate category scores: structureScore, technicalDepthScore, deliveryScore — each scored independently from 1 to 10 using the same encouraging philosophy below, not just copies of overallScore.
 - If the transcript is very similar to the reference answer and is understandable, the score should usually be 8 to 10.
 - If it closely matches the reference but sounds slightly stiff, repetitive, or overlong, score 8 or 9 and give delivery tips.
 - If it is incomplete, off-topic, very short, unclear, or missing major points, score lower.
@@ -1264,6 +1272,9 @@ Feedback rules:
         const parsed = await callClaude(prompt, 2200, "claude-sonnet-4-6");
 
         parsed.overallScore = Number(parsed.overallScore) || 0;
+        parsed.structureScore = Math.max(1, Math.min(10, Number(parsed.structureScore) || parsed.overallScore));
+        parsed.technicalDepthScore = Math.max(1, Math.min(10, Number(parsed.technicalDepthScore) || parsed.overallScore));
+        parsed.deliveryScore = Math.max(1, Math.min(10, Number(parsed.deliveryScore) || parsed.overallScore));
         parsed.strengths = Array.isArray(parsed.strengths) ? parsed.strengths.slice(0, 3) : [];
         parsed.improvements = Array.isArray(parsed.improvements) ? parsed.improvements.slice(0, 3) : [];
 
@@ -1273,6 +1284,29 @@ Feedback rules:
 
         if (isVerySimilarToReference) {
             parsed.improvedAnswer = "";
+        }
+
+        // Save this attempt for My Progress — doesn't block or fail the
+        // response if it errors, since the feedback itself already succeeded.
+        try {
+            await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(req.googleUser.email)}&select=id`)
+                .then(async users => {
+                    if (!users || users.length === 0) return;
+                    await supabaseFetch(`/rest/v1/practice_sessions`, {
+                        method: "POST",
+                        body: JSON.stringify({
+                            user_id: users[0].id,
+                            company: safeCompany || null,
+                            context_type: safeContextType || null,
+                            overall_score: parsed.overallScore,
+                            structure_score: parsed.structureScore,
+                            technical_depth_score: parsed.technicalDepthScore,
+                            delivery_score: parsed.deliveryScore
+                        })
+                    });
+                });
+        } catch (saveErr) {
+            console.error("practice-feedback: failed to save session (non-fatal):", saveErr);
         }
 
         res.json(parsed);
@@ -1465,7 +1499,123 @@ app.post("/sessions/delete", requireApiToken, verifyGoogleUser, async (req, res)
     }
 });
 
-// ── Stripe Checkout ──
+// ── My Progress — practice history, growth areas, and milestones ──
+app.post("/progress", requireApiToken, verifyGoogleUser, async (req, res) => {
+    try {
+        const users = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(req.googleUser.email)}&select=id`);
+        if (!users || users.length === 0) {
+            return res.json({ success: true, sessions: [], milestones: [], growthArea: null });
+        }
+        const userId = users[0].id;
+
+        const sessions = await supabaseFetch(
+            `/rest/v1/practice_sessions?user_id=eq.${userId}&order=created_at.asc&select=*`
+        );
+        const practiceSessions = sessions || [];
+
+        const jobSessions = await supabaseFetch(
+            `/rest/v1/job_sessions?user_id=eq.${userId}&select=status`
+        );
+        const totalJobs = (jobSessions || []).length;
+        const appliedJobs = (jobSessions || []).filter(j => j.status === "applied").length;
+
+        // ── Growth area — the lowest-average category, framed positively ──
+        let growthArea = null;
+        if (practiceSessions.length >= 3) {
+            const avg = key => practiceSessions.reduce((sum, s) => sum + (s[key] || 0), 0) / practiceSessions.length;
+            const categories = [
+                { key: "structure_score", label: "Structure", tip: "Try organising your answers with a clear beginning, middle, and end — the STAR method can help here." },
+                { key: "technical_depth_score", label: "Technical Depth", tip: "A few more specific technical details in your answers could make them even stronger." },
+                { key: "delivery_score", label: "Delivery", tip: "Practising your pacing and confidence out loud a bit more could help your delivery feel even smoother." }
+            ];
+            const scored = categories.map(c => ({ ...c, avg: avg(c.key) }));
+            scored.sort((a, b) => a.avg - b.avg);
+            growthArea = { label: scored[0].label, tip: scored[0].tip, average: Math.round(scored[0].avg * 10) / 10 };
+        }
+
+        // ── Milestones ──
+        const milestones = [];
+
+        milestones.push({
+            id: "first_step",
+            name: "First Step",
+            description: "Complete your first mock interview practice",
+            unlocked: practiceSessions.length >= 1
+        });
+
+        milestones.push({
+            id: "consistent_practice",
+            name: "Consistent Practice",
+            description: "Complete 10 practice sessions",
+            unlocked: practiceSessions.length >= 10,
+            progress: Math.min(practiceSessions.length, 10),
+            target: 10
+        });
+
+        let risingConfidenceUnlocked = false;
+        if (practiceSessions.length >= 6) {
+            const first3 = practiceSessions.slice(0, 3);
+            const last3 = practiceSessions.slice(-3);
+            const avgOf = arr => arr.reduce((sum, s) => sum + (s.overall_score || 0), 0) / arr.length;
+            risingConfidenceUnlocked = (avgOf(last3) - avgOf(first3)) >= 2;
+        }
+        milestones.push({
+            id: "rising_confidence",
+            name: "Rising Confidence",
+            description: "Improve your average score as you keep practicing",
+            unlocked: risingConfidenceUnlocked
+        });
+
+        let wellRoundedUnlocked = false;
+        if (practiceSessions.length >= 3) {
+            const avg = key => practiceSessions.reduce((sum, s) => sum + (s[key] || 0), 0) / practiceSessions.length;
+            wellRoundedUnlocked = avg("structure_score") >= 8 && avg("technical_depth_score") >= 8 && avg("delivery_score") >= 8;
+        }
+        milestones.push({
+            id: "well_rounded",
+            name: "Well-Rounded",
+            description: "Score strongly across structure, technical depth, and delivery",
+            unlocked: wellRoundedUnlocked
+        });
+
+        milestones.push({
+            id: "job_hunter",
+            name: "Job Hunter",
+            description: "Save or prep 10 jobs",
+            unlocked: totalJobs >= 10,
+            progress: Math.min(totalJobs, 10),
+            target: 10
+        });
+
+        milestones.push({
+            id: "follow_through",
+            name: "Follow Through",
+            description: "Mark 5 jobs as Applied",
+            unlocked: appliedJobs >= 5,
+            progress: Math.min(appliedJobs, 5),
+            target: 5
+        });
+
+        milestones.push({
+            id: "perfect_practice",
+            name: "Perfect Practice",
+            description: "Score a 10/10 on any practice session",
+            unlocked: practiceSessions.some(s => s.overall_score === 10)
+        });
+
+        res.json({
+            success: true,
+            sessions: practiceSessions,
+            growthArea,
+            milestones
+        });
+    } catch (err) {
+        console.error("progress error:", err);
+        res.status(500).json({ error: "Could not fetch progress." });
+    }
+});
+
+
 const CREDIT_TIERS = {
     try: { priceEnv: "STRIPE_PRICE_TRY", credits: 2 },
     starter: { priceEnv: "STRIPE_PRICE_STARTER", credits: 10 },
