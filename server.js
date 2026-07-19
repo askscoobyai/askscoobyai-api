@@ -1128,11 +1128,46 @@ app.post("/generate-question-audio", async (req, res) => {
             });
         }
 
-        // Claude does not have a TTS API — return 501 so the extension
-        // falls back to the browser's built-in speech synthesis automatically
-        return res.status(501).json({
-            error: "Audio generation is handled by the browser."
-        });
+        if (!process.env.ELEVENLABS_API_KEY) {
+            // Not configured yet — extension falls back to the browser's
+            // built-in speech synthesis automatically.
+            return res.status(501).json({
+                error: "Voice generation is not configured yet."
+            });
+        }
+
+        const voiceId = process.env.ELEVENLABS_VOICE_ID;
+        const elevenRes = await fetch(
+            `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`,
+            {
+                method: "POST",
+                headers: {
+                    "xi-api-key": process.env.ELEVENLABS_API_KEY,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    text: question,
+                    model_id: "eleven_flash_v2_5",
+                    voice_settings: {
+                        stability: 0.5,
+                        similarity_boost: 0.75,
+                        style: 0.0,
+                        use_speaker_boost: true
+                    }
+                })
+            }
+        );
+
+        if (!elevenRes.ok) {
+            console.error("ElevenLabs TTS error:", elevenRes.status, await elevenRes.text().catch(() => ""));
+            // Extension falls back to browser voice automatically on any
+            // non-2xx response here.
+            return res.status(502).json({ error: "Could not generate voice audio." });
+        }
+
+        const audioBuffer = Buffer.from(await elevenRes.arrayBuffer());
+        res.set("Content-Type", "audio/mpeg");
+        res.send(audioBuffer);
 
     } catch (error) {
         console.error(
