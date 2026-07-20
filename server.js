@@ -1208,16 +1208,21 @@ app.post("/generate-practice-feedback", async (req, res) => {
         const safeCompany = getCompany(company);
         const { trimmedCV, trimmedJD } = trimInputs(cv || "", jd || "");
 
-        // ── Free practice allowance across the whole account, then charge a
-        // credit ── First 20 practice-feedback requests EVER for this user
-        // (across all jobs) are free. Beyond that, each additional attempt
-        // costs 1 credit, charged only when feedback is actually delivered
-        // (not on Start Recording), so re-recording stays free.
+        // ── Free practice allowance across the whole account, then 1 credit
+        // unlocks a block of 5 more sessions ── First 20 practice-feedback
+        // requests EVER for this user (across all jobs) are free. Beyond
+        // that, 1 credit is charged only on the FIRST session of each new
+        // block of 5 — the following 4 in that block are then included at
+        // no extra charge, until the next block starts. Charging only
+        // happens when feedback is actually delivered (not on Start
+        // Recording), so re-recording stays free.
         const FREE_PRACTICE_TOTAL = 20;
+        const SESSIONS_PER_CREDIT = 5;
         const jobFingerprint = getJobFingerprint(trimmedJD, safeCompany);
         let totalSessionsUsed = 0;
         let creditCharged = false;
         let creditsRemainingAfterCharge = null;
+        let sessionsRemainingInBlock = null;
 
         try {
             const capUsers = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(req.googleUser.email)}&select=id`);
@@ -1228,20 +1233,29 @@ app.post("/generate-practice-feedback", async (req, res) => {
                 totalSessionsUsed = (existingSessions || []).length;
 
                 if (totalSessionsUsed >= FREE_PRACTICE_TOTAL) {
-                    const spendRows = await supabaseRpc("spend_credit", {
-                        p_email: req.googleUser.email,
-                        p_type: "practice_session"
-                    });
-                    const spend = Array.isArray(spendRows) ? spendRows[0] : spendRows;
+                    const sessionsBeyondFree = totalSessionsUsed - FREE_PRACTICE_TOTAL;
+                    const isFirstOfNewBlock = sessionsBeyondFree % SESSIONS_PER_CREDIT === 0;
 
-                    if (!spend || !spend.spent) {
-                        return res.status(402).json({
-                            error: "You've used all your free practice sessions. Please buy more credits to continue.",
-                            noCredits: true
+                    if (isFirstOfNewBlock) {
+                        const spendRows = await supabaseRpc("spend_credit", {
+                            p_email: req.googleUser.email,
+                            p_type: "practice_session"
                         });
+                        const spend = Array.isArray(spendRows) ? spendRows[0] : spendRows;
+
+                        if (!spend || !spend.spent) {
+                            return res.status(402).json({
+                                error: "You've used all your free and paid practice sessions. Please buy more credits to continue.",
+                                noCredits: true
+                            });
+                        }
+                        creditCharged = true;
+                        creditsRemainingAfterCharge = spend.credits;
                     }
-                    creditCharged = true;
-                    creditsRemainingAfterCharge = spend.credits;
+
+                    const sessionsBeyondFreeAfterThis = sessionsBeyondFree + 1;
+                    const positionInBlock = ((sessionsBeyondFreeAfterThis - 1) % SESSIONS_PER_CREDIT) + 1;
+                    sessionsRemainingInBlock = SESSIONS_PER_CREDIT - positionInBlock;
                 }
             }
         } catch (capErr) {
@@ -1396,6 +1410,7 @@ Feedback rules:
 
         parsed.freeSessionsRemaining = Math.max(0, FREE_PRACTICE_TOTAL - (totalSessionsUsed + 1));
         parsed.creditCharged = creditCharged;
+        parsed.sessionsRemainingInBlock = sessionsRemainingInBlock;
         if (creditsRemainingAfterCharge !== null) {
             parsed.creditsRemaining = creditsRemainingAfterCharge;
         }
@@ -1815,7 +1830,7 @@ app.get("/terms", (req, res) => {
 
         <h2>5. Credits and Payments</h2>
         <ul>
-            <li>Credits are consumed when you use certain features: Interview Q&amp;A, STAR Answers, Cover Letter &amp; CV generation, and Scooby Coach analysis all cost 1 credit. AI Mock Interview practice feedback is free for your first 20 sessions (across your whole account); each additional session beyond that costs 1 credit.</li>
+            <li>Credits are consumed when you use certain features: Interview Q&amp;A, STAR Answers, Cover Letter &amp; CV generation, and Scooby Coach analysis all cost 1 credit. AI Mock Interview practice feedback is free for your first 20 sessions (across your whole account); after that, 1 credit unlocks each next block of 5 practice sessions.</li>
             <li>Credits are non-refundable except where required by applicable consumer protection law.</li>
             <li>Payments are processed by Stripe. We do not store your payment card details.</li>
         </ul>
@@ -1841,13 +1856,26 @@ const SCOOBY_COACH_MIN_SESSIONS = 5;
 app.post("/practice-sessions/free-remaining", requireApiToken, verifyGoogleUser, async (req, res) => {
     try {
         const FREE_PRACTICE_TOTAL = 20;
+        const SESSIONS_PER_CREDIT = 5;
         const users = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(req.googleUser.email)}&select=id`);
         if (!users || users.length === 0) {
-            return res.json({ success: true, freeSessionsRemaining: FREE_PRACTICE_TOTAL });
+            return res.json({ success: true, freeSessionsRemaining: FREE_PRACTICE_TOTAL, sessionsRemainingInBlock: null });
         }
         const sessions = await supabaseFetch(`/rest/v1/practice_sessions?user_id=eq.${users[0].id}&select=id`);
         const used = (sessions || []).length;
-        res.json({ success: true, freeSessionsRemaining: Math.max(0, FREE_PRACTICE_TOTAL - used) });
+        const freeSessionsRemaining = Math.max(0, FREE_PRACTICE_TOTAL - used);
+
+        let sessionsRemainingInBlock = null;
+        if (used >= FREE_PRACTICE_TOTAL) {
+            const sessionsBeyondFree = used - FREE_PRACTICE_TOTAL;
+            const positionInBlock = (sessionsBeyondFree % SESSIONS_PER_CREDIT) + 1;
+            sessionsRemainingInBlock = SESSIONS_PER_CREDIT - positionInBlock + 1;
+            // If this lands exactly on a fresh (uncharged) block boundary,
+            // there are 0 sessions available until the next credit is spent.
+            if (sessionsBeyondFree % SESSIONS_PER_CREDIT === 0) sessionsRemainingInBlock = 0;
+        }
+
+        res.json({ success: true, freeSessionsRemaining, sessionsRemainingInBlock });
     } catch (err) {
         console.error("free-remaining check error:", err);
         res.status(500).json({ error: "Could not check remaining free sessions." });
