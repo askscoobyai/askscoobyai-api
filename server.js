@@ -1839,6 +1839,22 @@ const SCOOBY_COACH_MIN_SESSIONS = 5;
 
 // Free — just checks unlock status and returns the last cached analysis,
 // if one exists. Viewing/revisiting never costs a credit.
+app.post("/practice-sessions/free-remaining", requireApiToken, verifyGoogleUser, async (req, res) => {
+    try {
+        const FREE_PRACTICE_TOTAL = 20;
+        const users = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(req.googleUser.email)}&select=id`);
+        if (!users || users.length === 0) {
+            return res.json({ success: true, freeSessionsRemaining: FREE_PRACTICE_TOTAL });
+        }
+        const sessions = await supabaseFetch(`/rest/v1/practice_sessions?user_id=eq.${users[0].id}&select=id`);
+        const used = (sessions || []).length;
+        res.json({ success: true, freeSessionsRemaining: Math.max(0, FREE_PRACTICE_TOTAL - used) });
+    } catch (err) {
+        console.error("free-remaining check error:", err);
+        res.status(500).json({ error: "Could not check remaining free sessions." });
+    }
+});
+
 app.post("/scooby-coach/status", requireApiToken, verifyGoogleUser, async (req, res) => {
     try {
         const users = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(req.googleUser.email)}&select=id`);
