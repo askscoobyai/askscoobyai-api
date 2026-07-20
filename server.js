@@ -1792,6 +1792,7 @@ app.get("/terms", (req, res) => {
         <h2>5. Credits and Payments</h2>
         <ul>
             <li>Credits are consumed when you use certain features (Interview Q&amp;A, STAR Answers, Cover Letter &amp; CV generation, and Scooby Coach analysis). AI Mock Interview practice feedback does not currently consume credits, though this may change in future with notice.</li>
+            <li><strong>Fair use limits may apply to free features</strong> (such as AI Mock Interview practice feedback) to prevent abuse. Reasonable personal practice use is never affected by this.</li>
             <li>Credits are non-refundable except where required by applicable consumer protection law.</li>
             <li>Payments are processed by Stripe. We do not store your payment card details.</li>
         </ul>
