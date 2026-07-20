@@ -1191,29 +1191,6 @@ app.post("/generate-practice-feedback", async (req, res) => {
             });
         }
 
-        // ── Daily cap on this free feature ──
-        // Practice feedback costs no credits, so there's no natural
-        // economic limit on repeated use. This caps genuine free usage
-        // generously while preventing unbounded cost from repeated/scripted
-        // abuse of a route that has no credit check of its own.
-        const DAILY_PRACTICE_LIMIT = 30;
-        try {
-            const capUsers = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(req.googleUser.email)}&select=id`);
-            if (capUsers && capUsers.length > 0) {
-                const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-                const todaysSessions = await supabaseFetch(
-                    `/rest/v1/practice_sessions?user_id=eq.${capUsers[0].id}&created_at=gte.${encodeURIComponent(since)}&select=id`
-                );
-                if ((todaysSessions || []).length >= DAILY_PRACTICE_LIMIT) {
-                    return res.status(429).json({
-                        error: "You've reached today's practice limit. Please try again tomorrow."
-                    });
-                }
-            }
-        } catch (capErr) {
-            console.error("practice-feedback: daily cap check failed (allowing request through):", capErr);
-        }
-
         const {
             question,
             expectedAnswer,
@@ -1230,6 +1207,46 @@ app.post("/generate-practice-feedback", async (req, res) => {
         const safeContextType = cleanText(contextType).slice(0, 50);
         const safeCompany = getCompany(company);
         const { trimmedCV, trimmedJD } = trimInputs(cv || "", jd || "");
+
+        // ── Free practice allowance across the whole account, then charge a
+        // credit ── First 20 practice-feedback requests EVER for this user
+        // (across all jobs) are free. Beyond that, each additional attempt
+        // costs 1 credit, charged only when feedback is actually delivered
+        // (not on Start Recording), so re-recording stays free.
+        const FREE_PRACTICE_TOTAL = 20;
+        const jobFingerprint = getJobFingerprint(trimmedJD, safeCompany);
+        let totalSessionsUsed = 0;
+        let creditCharged = false;
+        let creditsRemainingAfterCharge = null;
+
+        try {
+            const capUsers = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(req.googleUser.email)}&select=id`);
+            if (capUsers && capUsers.length > 0) {
+                const existingSessions = await supabaseFetch(
+                    `/rest/v1/practice_sessions?user_id=eq.${capUsers[0].id}&select=id`
+                );
+                totalSessionsUsed = (existingSessions || []).length;
+
+                if (totalSessionsUsed >= FREE_PRACTICE_TOTAL) {
+                    const spendRows = await supabaseRpc("spend_credit", {
+                        p_email: req.googleUser.email,
+                        p_type: "practice_session"
+                    });
+                    const spend = Array.isArray(spendRows) ? spendRows[0] : spendRows;
+
+                    if (!spend || !spend.spent) {
+                        return res.status(402).json({
+                            error: "You've used all your free practice sessions. Please buy more credits to continue.",
+                            noCredits: true
+                        });
+                    }
+                    creditCharged = true;
+                    creditsRemainingAfterCharge = spend.credits;
+                }
+            }
+        } catch (capErr) {
+            console.error("practice-feedback: free/credit check failed (allowing request through as free):", capErr);
+        }
 
         const similarityScore = getSimilarityScore(safeTranscript, safeExpectedAnswer);
         const isVerySimilarToReference = similarityScore >= 0.72;
@@ -1354,6 +1371,7 @@ Feedback rules:
                         method: "POST",
                         body: JSON.stringify({
                             user_id: users[0].id,
+                            job_fingerprint: jobFingerprint,
                             company: safeCompany || null,
                             context_type: safeContextType || null,
                             question: safeQuestion || null,
@@ -1374,6 +1392,12 @@ Feedback rules:
                 });
         } catch (saveErr) {
             console.error("practice-feedback: failed to save session (non-fatal):", saveErr);
+        }
+
+        parsed.freeSessionsRemaining = Math.max(0, FREE_PRACTICE_TOTAL - (totalSessionsUsed + 1));
+        parsed.creditCharged = creditCharged;
+        if (creditsRemainingAfterCharge !== null) {
+            parsed.creditsRemaining = creditsRemainingAfterCharge;
         }
 
         res.json(parsed);
