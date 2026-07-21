@@ -1373,7 +1373,7 @@ app.post("/generate-practice-feedback", async (req, res) => {
 
             totalSessionsUsed = result.new_count - 1; // sessions used BEFORE this one, matching prior variable meaning
             creditCharged = !!result.charged;
-            if (creditCharged) creditsRemainingAfterCharge = result.credits;
+            if (creditCharged) creditsRemainingAfterCharge = result.credits_remaining;
             sessionsRemainingInBlock = result.sessions_remaining_in_block;
         } catch (capErr) {
             console.error("practice-feedback: atomic free/credit check failed (allowing request through as free):", capErr);
