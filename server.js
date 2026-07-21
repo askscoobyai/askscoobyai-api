@@ -253,6 +253,7 @@ app.use(["/generate-interview", "/generate-star", "/generate-docs"], verifyGoogl
 // Practice feedback doesn't cost a credit, but we still need to know who's
 // practicing so we can save their score history for My Progress.
 app.use(["/generate-practice-feedback"], verifyGoogleUser);
+app.use(["/generate-question-audio"], verifyGoogleUser);
 const anthropic = new Anthropic({
     apiKey: process.env.ANTHROPIC_API_KEY,
     timeout: 60000
@@ -1223,6 +1224,30 @@ app.post("/generate-question-audio", async (req, res) => {
             });
         }
 
+        // ── Daily cap, per user ── generously above realistic legitimate
+        // use (each practice attempt uses one TTS call), bounding worst-case
+        // cost/quota exposure from someone spamming Start Interview without
+        // ever recording. Hitting this cap fails into the extension's
+        // existing browser-voice fallback rather than showing an error.
+        const TTS_DAILY_LIMIT = 50;
+        let ttsRemainingToday = null;
+        try {
+            const users = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(req.googleUser.email)}&select=id`);
+            if (users && users.length > 0) {
+                const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+                const todaysUsage = await supabaseFetch(
+                    `/rest/v1/tts_usage?user_id=eq.${users[0].id}&created_at=gte.${encodeURIComponent(since)}&select=id`
+                );
+                const usedToday = (todaysUsage || []).length;
+                if (usedToday >= TTS_DAILY_LIMIT) {
+                    return res.status(429).json({ error: "Daily voice generation limit reached." });
+                }
+                ttsRemainingToday = TTS_DAILY_LIMIT - usedToday - 1; // -1 for the call about to happen
+            }
+        } catch (capErr) {
+            console.error("tts daily cap check failed (allowing request through):", capErr);
+        }
+
         const voiceId = process.env.ELEVENLABS_VOICE_ID;
         const elevenRes = await fetch(
             `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`,
@@ -1254,7 +1279,23 @@ app.post("/generate-question-audio", async (req, res) => {
 
         const audioBuffer = Buffer.from(await elevenRes.arrayBuffer());
         res.set("Content-Type", "audio/mpeg");
+        if (ttsRemainingToday !== null) {
+            res.set("X-Tts-Sessions-Remaining", String(ttsRemainingToday));
+        }
         res.send(audioBuffer);
+
+        // Log usage after responding — doesn't delay the audio, and a
+        // logging failure here shouldn't affect the (already-sent) response.
+        supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(req.googleUser.email)}&select=id`)
+            .then(users => {
+                if (users && users.length > 0) {
+                    return supabaseFetch(`/rest/v1/tts_usage`, {
+                        method: "POST",
+                        body: JSON.stringify({ user_id: users[0].id })
+                    });
+                }
+            })
+            .catch(err => console.error("tts_usage logging failed (non-fatal):", err));
 
     } catch (error) {
         console.error(
@@ -1299,54 +1340,43 @@ app.post("/generate-practice-feedback", async (req, res) => {
         // unlocks a block of 5 more sessions ── First 20 practice-feedback
         // requests EVER for this user (across all jobs) are free. Beyond
         // that, 1 credit is charged only on the FIRST session of each new
-        // block of 5 — the following 4 in that block are then included at
-        // no extra charge, until the next block starts. Charging only
-        // happens when feedback is actually delivered (not on Start
-        // Recording), so re-recording stays free.
+        // block of 5. Charging only happens when feedback is actually
+        // delivered (not on Start Recording), so re-recording stays free.
+        //
+        // This whole decision (count + free-vs-charge + deduct) happens in
+        // ONE atomic database call — see charge_practice_session() — rather
+        // than as separate count/decide/charge steps, which previously left
+        // a small window where near-simultaneous requests could both read
+        // "still free" before either had recorded its own count.
         const FREE_PRACTICE_TOTAL = 20;
         const SESSIONS_PER_CREDIT = 5;
         const jobFingerprint = getJobFingerprint(trimmedJD, safeCompany);
-        let totalSessionsUsed = 0;
         let creditCharged = false;
         let creditsRemainingAfterCharge = null;
         let sessionsRemainingInBlock = null;
+        let totalSessionsUsed = 0;
 
         try {
-            const capUsers = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(req.googleUser.email)}&select=id`);
-            if (capUsers && capUsers.length > 0) {
-                const existingSessions = await supabaseFetch(
-                    `/rest/v1/practice_sessions?user_id=eq.${capUsers[0].id}&select=id`
-                );
-                totalSessionsUsed = (existingSessions || []).length;
+            const chargeRows = await supabaseRpc("charge_practice_session", {
+                p_email: req.googleUser.email,
+                p_free_total: FREE_PRACTICE_TOTAL,
+                p_sessions_per_credit: SESSIONS_PER_CREDIT
+            });
+            const result = Array.isArray(chargeRows) ? chargeRows[0] : chargeRows;
 
-                if (totalSessionsUsed >= FREE_PRACTICE_TOTAL) {
-                    const sessionsBeyondFree = totalSessionsUsed - FREE_PRACTICE_TOTAL;
-                    const isFirstOfNewBlock = sessionsBeyondFree % SESSIONS_PER_CREDIT === 0;
-
-                    if (isFirstOfNewBlock) {
-                        const spendRows = await supabaseRpc("spend_credit", {
-                            p_email: req.googleUser.email,
-                            p_type: "practice_session"
-                        });
-                        const spend = Array.isArray(spendRows) ? spendRows[0] : spendRows;
-
-                        if (!spend || !spend.spent) {
-                            return res.status(402).json({
-                                error: "You've used all your free and paid practice sessions. Please buy more credits to continue.",
-                                noCredits: true
-                            });
-                        }
-                        creditCharged = true;
-                        creditsRemainingAfterCharge = spend.credits;
-                    }
-
-                    const sessionsBeyondFreeAfterThis = sessionsBeyondFree + 1;
-                    const positionInBlock = ((sessionsBeyondFreeAfterThis - 1) % SESSIONS_PER_CREDIT) + 1;
-                    sessionsRemainingInBlock = SESSIONS_PER_CREDIT - positionInBlock;
-                }
+            if (!result || !result.allowed) {
+                return res.status(402).json({
+                    error: "You've used all your free and paid practice sessions. Please buy more credits to continue.",
+                    noCredits: true
+                });
             }
+
+            totalSessionsUsed = result.new_count - 1; // sessions used BEFORE this one, matching prior variable meaning
+            creditCharged = !!result.charged;
+            if (creditCharged) creditsRemainingAfterCharge = result.credits;
+            sessionsRemainingInBlock = result.sessions_remaining_in_block;
         } catch (capErr) {
-            console.error("practice-feedback: free/credit check failed (allowing request through as free):", capErr);
+            console.error("practice-feedback: atomic free/credit check failed (allowing request through as free):", capErr);
         }
 
         const similarityScore = getSimilarityScore(safeTranscript, safeExpectedAnswer);
@@ -1944,12 +1974,11 @@ app.post("/practice-sessions/free-remaining", requireApiToken, verifyGoogleUser,
     try {
         const FREE_PRACTICE_TOTAL = 20;
         const SESSIONS_PER_CREDIT = 5;
-        const users = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(req.googleUser.email)}&select=id`);
+        const users = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(req.googleUser.email)}&select=id,practice_session_count`);
         if (!users || users.length === 0) {
             return res.json({ success: true, freeSessionsRemaining: FREE_PRACTICE_TOTAL, sessionsRemainingInBlock: null });
         }
-        const sessions = await supabaseFetch(`/rest/v1/practice_sessions?user_id=eq.${users[0].id}&select=id`);
-        const used = (sessions || []).length;
+        const used = users[0].practice_session_count || 0;
         const freeSessionsRemaining = Math.max(0, FREE_PRACTICE_TOTAL - used);
 
         let sessionsRemainingInBlock = null;
