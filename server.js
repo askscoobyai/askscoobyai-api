@@ -745,8 +745,9 @@ app.post("/generate-interview", async (req, res) => {
         const weakInputInstruction = validation.weak
             ? `
 Input detail note:
-- The CV or job description is brief. Be extra careful not to invent details.
-- Keep answers useful, but avoid claiming specific achievements, tools, employers, metrics, or responsibilities unless they appear in the CV or job description.
+- The CV or job description is brief, but still write a committed, specific-sounding answer — use whatever real details ARE present (even a single tool, employer, or project), and build the answer around them directly.
+- Do not fall back to describing your general approach or process in hypothetical terms (e.g. "I would look for the most relevant project and explain why"). Actually name that project/tool/employer and answer as if speaking it in the interview, using only what's genuinely in the CV or job description.
+- Never invent specifics that aren't present — but never default to vague meta-commentary instead of an answer either. Sparse real detail, used directly, is always better than a generic description of what you'd do.
 `
             : "";
 
@@ -1053,7 +1054,9 @@ app.post("/generate-docs", async (req, res) => {
         const weakInputInstruction = validation.weak
             ? `
 Input detail note:
-- The CV or job description is brief. Be careful not to invent details.
+- The CV or job description is brief, but still write a committed, specific-sounding answer — use whatever real details ARE present (even a single tool, employer, or project), and build the answer around them directly.
+- Do not fall back to describing your general approach or process in hypothetical terms. Actually name that project/tool/employer and answer as if speaking it in the interview, using only what's genuinely in the CV or job description.
+- Never invent specifics that aren't present — but never default to vague meta-commentary instead of an answer either.
 `
             : "";
 
