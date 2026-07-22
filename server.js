@@ -92,40 +92,21 @@ function getJobFingerprint(jd, company) {
 
 // ── Distinguish "first time generating this section" (bundled under the
 // job's existing 1-credit unlock) from "regenerating a section that already
-// exists" (charges a fresh credit — but that one credit then covers
-// regenerating the OTHER two sections as well, mirroring how the original
-// unlock covers all 3, rather than charging separately per section).
+// exists" (charges a flat 1 credit per section regenerated — simple and
+// predictable, no cross-section bundling).
 async function checkRegenerationOrBundle(email, jobFingerprint, sectionType) {
-    const otherTypes = ["interview", "star", "docs"].filter(t => t !== sectionType);
     try {
         const users = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(email)}&select=id`);
         if (!users || users.length === 0) return { useOldLogic: true };
-        const userId = users[0].id;
 
         const existing = await supabaseFetch(
-            `/rest/v1/job_sessions?user_id=eq.${userId}&job_fingerprint=eq.${encodeURIComponent(jobFingerprint)}&select=id,generated_interview,generated_star,generated_docs,regen_used_interview,regen_used_star,regen_used_docs`
+            `/rest/v1/job_sessions?user_id=eq.${users[0].id}&job_fingerprint=eq.${encodeURIComponent(jobFingerprint)}&select=generated_interview,generated_star,generated_docs`
         );
         const row = existing && existing[0];
         const alreadyGeneratedBefore = row && row["generated_" + sectionType] === true;
 
         if (!alreadyGeneratedBefore) return { useOldLogic: true };
 
-        const alreadyUsedThisType = row["regen_used_" + sectionType] === true;
-        const roundActive = otherTypes.some(t => row["regen_used_" + t] === true);
-
-        if (roundActive && !alreadyUsedThisType) {
-            // Another section already used this paid round — this one rides
-            // along free, marking itself as used too.
-            await supabaseFetch(`/rest/v1/job_sessions?id=eq.${row.id}`, {
-                method: "PATCH",
-                body: JSON.stringify({ ["regen_used_" + sectionType]: true })
-            });
-            return { charged: false, isRegeneration: true, freeUnderRound: true };
-        }
-
-        // Either no round is active yet, or this section has already used
-        // its turn this round (asking again) — either way, a fresh charge
-        // starts a brand new round.
         const spendRows = await supabaseRpc("spend_credit", {
             p_email: email,
             p_type: "regenerate_" + sectionType
@@ -135,21 +116,10 @@ async function checkRegenerationOrBundle(email, jobFingerprint, sectionType) {
         if (!spend || !spend.spent) {
             return {
                 blocked: true,
-                error: "You've already generated this section before — this costs 1 credit, which unlocks all 3 sections for this job, and you don't have any remaining. Please buy more credits to continue.",
+                error: "You've already generated this section before — regenerating it costs 1 credit, and you don't have any remaining. Please buy more credits to continue.",
                 noCredits: true
             };
         }
-
-        // Reset the round, then mark this section as the one that used it.
-        await supabaseFetch(`/rest/v1/job_sessions?id=eq.${row.id}`, {
-            method: "PATCH",
-            body: JSON.stringify({
-                regen_used_interview: sectionType === "interview",
-                regen_used_star: sectionType === "star",
-                regen_used_docs: sectionType === "docs"
-            })
-        });
-
         return { charged: true, isRegeneration: true, creditsRemaining: spend.credits };
     } catch (err) {
         console.error("checkRegenerationOrBundle error (falling back to normal bundled logic):", err);
@@ -803,7 +773,7 @@ app.post("/generate-interview", async (req, res) => {
         }
 
         let creditsRemainingForResponse = null;
-        if (regenCheck.charged || regenCheck.freeUnderRound) {
+        if (regenCheck.charged) {
             creditsRemainingForResponse = regenCheck.creditsRemaining;
         } else {
             // ── Atomic credit charge — 1 credit unlocks all 3 sections for
@@ -977,7 +947,7 @@ app.post("/generate-star", async (req, res) => {
         }
 
         let creditsRemainingForResponse = null;
-        if (regenCheck.charged || regenCheck.freeUnderRound) {
+        if (regenCheck.charged) {
             creditsRemainingForResponse = regenCheck.creditsRemaining;
         } else {
             // ── Atomic credit charge — same job-fingerprint scheme as /generate-interview.
@@ -1142,7 +1112,7 @@ app.post("/generate-docs", async (req, res) => {
         }
 
         let creditsRemainingForResponse = null;
-        if (regenCheck.charged || regenCheck.freeUnderRound) {
+        if (regenCheck.charged) {
             creditsRemainingForResponse = regenCheck.creditsRemaining;
         } else {
             // ── Atomic credit charge — same job-fingerprint scheme as the other two routes.
@@ -1645,24 +1615,12 @@ app.post("/jobs/generation-status", requireApiToken, verifyGoogleUser, async (re
         const jobFingerprint = getJobFingerprint(trimmedJD, sanitizedCompany);
 
         const existing = await supabaseFetch(
-            `/rest/v1/job_sessions?user_id=eq.${users[0].id}&job_fingerprint=eq.${encodeURIComponent(jobFingerprint)}&select=generated_interview,generated_star,generated_docs,regen_used_interview,regen_used_star,regen_used_docs`
+            `/rest/v1/job_sessions?user_id=eq.${users[0].id}&job_fingerprint=eq.${encodeURIComponent(jobFingerprint)}&select=generated_interview,generated_star,generated_docs`
         );
         const row = existing && existing[0];
         const alreadyGenerated = !!(row && row["generated_" + sectionType]);
 
-        // Would this specific regeneration actually be free? True if this
-        // exact section hasn't used its turn yet AND another section has
-        // already started an active paid round this section can ride along
-        // on — mirrors the same logic the actual charge decision uses.
-        let wouldBeFree = false;
-        if (row) {
-            const otherTypes = ["interview", "star", "docs"].filter(t => t !== sectionType);
-            const alreadyUsedThisType = row["regen_used_" + sectionType] === true;
-            const roundActive = otherTypes.some(t => row["regen_used_" + t] === true);
-            wouldBeFree = roundActive && !alreadyUsedThisType;
-        }
-
-        res.json({ success: true, alreadyGenerated, wouldBeFree });
+        res.json({ success: true, alreadyGenerated });
     } catch (err) {
         console.error("generation-status check error:", err);
         // Fail safe — if this check itself fails, don't block generation,
