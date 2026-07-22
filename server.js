@@ -1376,6 +1376,12 @@ Use this exact JSON structure:
   "structureFeedback": "string",
   "technicalDepthFeedback": "string",
   "deliveryFeedback": "string",
+  "deliveryBreakdown": {
+    "fillerWords": "string or null",
+    "pacing": "string or null",
+    "confidence": "string or null",
+    "clarity": "string or null"
+  },
   "improvedAnswer": "string"
 }
 
@@ -1441,6 +1447,13 @@ Feedback rules:
 - If this is a STAR answer, assess Situation, Task, Action, Result clarity and spoken flow.
 - For technical answers, assess whether the spoken answer communicated technical points clearly; do not demand extra technical examples when the transcript already matches the reference.
 - deliveryFeedback should focus on confidence, clarity, pacing, natural delivery, and sounding conversational rather than overly rehearsed.
+- deliveryBreakdown gives a categorized view of the same delivery assessment, split into 4 specific angles:
+  - fillerWords: 1 short sentence on filler words/hedging language (um, uh, like, you know, sort of) if genuinely present in the transcript. If speech was clean, say so briefly and positively rather than inventing a criticism. Never null unless there's truly nothing to comment on either way.
+  - pacing: 1 short sentence on pacing/rhythm as it reads from the transcript (rushed, natural, well-paced). Never invent a pacing judgement you can't support from the transcript's phrasing — if genuinely not assessable from text alone, use null.
+  - confidence: 1 short sentence on confident vs. hedging language (e.g. "I think maybe", "I'm not totally sure" vs. direct, assertive phrasing).
+  - clarity: 1 short sentence on whether the answer was clear and to-the-point vs. rambling or repetitive.
+  - Each should be encouraging in tone, following the same supportive coaching philosophy as the rest of the feedback — flag real patterns, but frame them constructively, never harshly.
+  - Use null only when a category genuinely isn't assessable from the transcript — don't pad with generic filler just to fill every field.
 - Improvements should feel motivating and confidence-building so the user feels encouraged to practise again.
 - If the transcript is already strong, improvements should be minor refinements rather than major criticisms.
 - improvedAnswer should only be provided if the transcript is materially weaker than the reference answer.
