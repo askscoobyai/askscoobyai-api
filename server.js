@@ -95,13 +95,13 @@ function getJobFingerprint(jd, company) {
 // exists" (charges a fresh credit, since it costs the same in Claude fees
 // either way, and the original 1-credit price only ever covered the first
 // pass at each of the 3 sections, not unlimited redo attempts).
-async function checkRegenerationOrBundle(email, jdSnippet, sectionType) {
+async function checkRegenerationOrBundle(email, jobFingerprint, sectionType) {
     try {
         const users = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(email)}&select=id`);
         if (!users || users.length === 0) return { useOldLogic: true };
 
         const existing = await supabaseFetch(
-            `/rest/v1/job_sessions?user_id=eq.${users[0].id}&jd_snippet=eq.${encodeURIComponent(jdSnippet)}&select=generated_interview,generated_star,generated_docs`
+            `/rest/v1/job_sessions?user_id=eq.${users[0].id}&job_fingerprint=eq.${encodeURIComponent(jobFingerprint)}&select=generated_interview,generated_star,generated_docs`
         );
         const row = existing && existing[0];
         const alreadyGeneratedBefore = row && row["generated_" + sectionType] === true;
@@ -767,8 +767,8 @@ app.post("/generate-interview", async (req, res) => {
         // ── Regeneration check first — if this section was already
         // generated for this job before, charge a fresh credit rather than
         // silently bundling it under the original unlock.
-        const jdSnippetForCheck = trimmedJD.slice(0, 500);
-        const regenCheck = await checkRegenerationOrBundle(req.googleUser.email, jdSnippetForCheck, "interview");
+        const jobFingerprint = getJobFingerprint(trimmedJD, providedCompany);
+        const regenCheck = await checkRegenerationOrBundle(req.googleUser.email, jobFingerprint, "interview");
 
         if (regenCheck.blocked) {
             return res.status(402).json({ error: regenCheck.error, noCredits: true });
@@ -782,7 +782,6 @@ app.post("/generate-interview", async (req, res) => {
             // this exact job, for the first pass at each. Charged once
             // here; the other two routes see the same fingerprint already
             // charged and proceed for free — but only for their first pass.
-            const jobFingerprint = getJobFingerprint(trimmedJD, providedCompany);
             const chargeRows = await supabaseRpc("charge_credit_for_job", {
                 p_email: req.googleUser.email,
                 p_job_fingerprint: jobFingerprint
@@ -942,8 +941,8 @@ app.post("/generate-star", async (req, res) => {
         const hasCompany = providedCompany.length > 1;
 
         // ── Regeneration check first, same pattern as /generate-interview.
-        const jdSnippetForCheck = trimmedJD.slice(0, 500);
-        const regenCheck = await checkRegenerationOrBundle(req.googleUser.email, jdSnippetForCheck, "star");
+        const jobFingerprint = getJobFingerprint(trimmedJD, providedCompany);
+        const regenCheck = await checkRegenerationOrBundle(req.googleUser.email, jobFingerprint, "star");
 
         if (regenCheck.blocked) {
             return res.status(402).json({ error: regenCheck.error, noCredits: true });
@@ -954,7 +953,6 @@ app.post("/generate-star", async (req, res) => {
             creditsRemainingForResponse = regenCheck.creditsRemaining;
         } else {
             // ── Atomic credit charge — same job-fingerprint scheme as /generate-interview.
-            const jobFingerprint = getJobFingerprint(trimmedJD, providedCompany);
             const chargeRows = await supabaseRpc("charge_credit_for_job", {
                 p_email: req.googleUser.email,
                 p_job_fingerprint: jobFingerprint
@@ -1108,8 +1106,8 @@ app.post("/generate-docs", async (req, res) => {
         const providedCompany = getCompany(company);
 
         // ── Regeneration check first, same pattern as the other two routes.
-        const jdSnippetForCheck = trimmedJD.slice(0, 500);
-        const regenCheck = await checkRegenerationOrBundle(req.googleUser.email, jdSnippetForCheck, "docs");
+        const jobFingerprint = getJobFingerprint(trimmedJD, providedCompany);
+        const regenCheck = await checkRegenerationOrBundle(req.googleUser.email, jobFingerprint, "docs");
 
         if (regenCheck.blocked) {
             return res.status(402).json({ error: regenCheck.error, noCredits: true });
@@ -1120,7 +1118,6 @@ app.post("/generate-docs", async (req, res) => {
             creditsRemainingForResponse = regenCheck.creditsRemaining;
         } else {
             // ── Atomic credit charge — same job-fingerprint scheme as the other two routes.
-            const jobFingerprint = getJobFingerprint(trimmedJD, providedCompany);
             const chargeRows = await supabaseRpc("charge_credit_for_job", {
                 p_email: req.googleUser.email,
                 p_job_fingerprint: jobFingerprint
@@ -1605,7 +1602,7 @@ app.post("/credits", requireApiToken, verifyGoogleUser, async (req, res) => {
 // warning before regenerating, rather than only finding out after the fact.
 app.post("/jobs/generation-status", requireApiToken, verifyGoogleUser, async (req, res) => {
     try {
-        const { jd, sectionType } = req.body || {};
+        const { jd, company, sectionType } = req.body || {};
         if (!["interview", "star", "docs"].includes(sectionType)) {
             return res.status(400).json({ error: "Invalid section type." });
         }
@@ -1615,9 +1612,12 @@ app.post("/jobs/generation-status", requireApiToken, verifyGoogleUser, async (re
             return res.json({ success: true, alreadyGenerated: false });
         }
 
-        const jdSnippet = String(jd || "").slice(0, 500);
+        const { trimmedJD } = trimInputs("", jd);
+        const sanitizedCompany = getCompany(company);
+        const jobFingerprint = getJobFingerprint(trimmedJD, sanitizedCompany);
+
         const existing = await supabaseFetch(
-            `/rest/v1/job_sessions?user_id=eq.${users[0].id}&jd_snippet=eq.${encodeURIComponent(jdSnippet)}&select=generated_interview,generated_star,generated_docs`
+            `/rest/v1/job_sessions?user_id=eq.${users[0].id}&job_fingerprint=eq.${encodeURIComponent(jobFingerprint)}&select=generated_interview,generated_star,generated_docs`
         );
         const row = existing && existing[0];
         const alreadyGenerated = !!(row && row["generated_" + sectionType]);
@@ -1658,9 +1658,15 @@ app.post("/sessions/save", requireApiToken, verifyGoogleUser, async (req, res) =
         const userId = users[0].id;
 
         const jdSnippet = String(jd || "").slice(0, 500);
+        // Match using the same robust fingerprint (and identical sanitization)
+        // used everywhere else — a raw 500-char text prefix was fragile and
+        // caused unrelated jobs with similar boilerplate intros to collide.
+        const { trimmedJD } = trimInputs("", jd);
+        const sanitizedCompany = getCompany(company);
+        const jobFingerprint = getJobFingerprint(trimmedJD, sanitizedCompany);
 
         const existing = await supabaseFetch(
-            `/rest/v1/job_sessions?user_id=eq.${userId}&jd_snippet=eq.${encodeURIComponent(jdSnippet)}&select=*`
+            `/rest/v1/job_sessions?user_id=eq.${userId}&job_fingerprint=eq.${encodeURIComponent(jobFingerprint)}&select=*`
         );
 
         if (existing && existing.length > 0) {
@@ -1673,6 +1679,7 @@ app.post("/sessions/save", requireApiToken, verifyGoogleUser, async (req, res) =
                     generated_docs: generated_docs ?? session.generated_docs,
                     credit_used: credit_used ?? session.credit_used,
                     jd_full: jd || session.jd_full || "",
+                    job_fingerprint: jobFingerprint,
                     answers_interview: answers_interview !== undefined ? answers_interview : session.answers_interview,
                     answers_star: answers_star !== undefined ? answers_star : session.answers_star,
                     answers_docs: answers_docs !== undefined ? answers_docs : session.answers_docs
@@ -1689,6 +1696,7 @@ app.post("/sessions/save", requireApiToken, verifyGoogleUser, async (req, res) =
                 company: company || "",
                 jd_snippet: jdSnippet,
                 jd_full: jd || "",
+                job_fingerprint: jobFingerprint,
                 generated_interview: generated_interview || false,
                 generated_star: generated_star || false,
                 generated_docs: generated_docs || false,
