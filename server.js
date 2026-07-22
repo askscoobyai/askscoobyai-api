@@ -90,43 +90,6 @@ function getJobFingerprint(jd, company) {
     return crypto.createHash("sha256").update(normalized).digest("hex").slice(0, 40);
 }
 
-// ── Distinguish "first time generating this section" (bundled under the
-// job's existing 1-credit unlock) from "regenerating a section that already
-// exists" (charges a flat 1 credit per section regenerated — simple and
-// predictable, no cross-section bundling).
-async function checkRegenerationOrBundle(email, jobFingerprint, sectionType) {
-    try {
-        const users = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(email)}&select=id`);
-        if (!users || users.length === 0) return { useOldLogic: true };
-
-        const existing = await supabaseFetch(
-            `/rest/v1/job_sessions?user_id=eq.${users[0].id}&job_fingerprint=eq.${encodeURIComponent(jobFingerprint)}&select=generated_interview,generated_star,generated_docs`
-        );
-        const row = existing && existing[0];
-        const alreadyGeneratedBefore = row && row["generated_" + sectionType] === true;
-
-        if (!alreadyGeneratedBefore) return { useOldLogic: true };
-
-        const spendRows = await supabaseRpc("spend_credit", {
-            p_email: email,
-            p_type: "regenerate_" + sectionType
-        });
-        const spend = Array.isArray(spendRows) ? spendRows[0] : spendRows;
-
-        if (!spend || !spend.spent) {
-            return {
-                blocked: true,
-                error: "You've already generated this section before — regenerating it costs 1 credit, and you don't have any remaining. Please buy more credits to continue.",
-                noCredits: true
-            };
-        }
-        return { charged: true, isRegeneration: true, creditsRemaining: spend.credits };
-    } catch (err) {
-        console.error("checkRegenerationOrBundle error (falling back to normal bundled logic):", err);
-        return { useOldLogic: true };
-    }
-}
-
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
     .split(",")
     .map((origin) => origin.trim())
@@ -762,37 +725,21 @@ app.post("/generate-interview", async (req, res) => {
         const hasCompany = providedCompany.length > 1;
         const targetInterviewQuestionCount = hasCompany ? 12 : 11;
 
-        // ── Regeneration check first — if this section was already
-        // generated for this job before, charge a fresh credit rather than
-        // silently bundling it under the original unlock.
+        // ── Atomic credit charge — 1 credit unlocks all 3 sections for this
+        // exact job. Charged once here; the other two routes see the same
+        // fingerprint already charged and proceed for free.
         const jobFingerprint = getJobFingerprint(trimmedJD, providedCompany);
-        const regenCheck = await checkRegenerationOrBundle(req.googleUser.email, jobFingerprint, "interview");
+        const chargeRows = await supabaseRpc("charge_credit_for_job", {
+            p_email: req.googleUser.email,
+            p_job_fingerprint: jobFingerprint
+        });
+        const charge = Array.isArray(chargeRows) ? chargeRows[0] : chargeRows;
 
-        if (regenCheck.blocked) {
-            return res.status(402).json({ error: regenCheck.error, noCredits: true });
-        }
-
-        let creditsRemainingForResponse = null;
-        if (regenCheck.charged) {
-            creditsRemainingForResponse = regenCheck.creditsRemaining;
-        } else {
-            // ── Atomic credit charge — 1 credit unlocks all 3 sections for
-            // this exact job, for the first pass at each. Charged once
-            // here; the other two routes see the same fingerprint already
-            // charged and proceed for free — but only for their first pass.
-            const chargeRows = await supabaseRpc("charge_credit_for_job", {
-                p_email: req.googleUser.email,
-                p_job_fingerprint: jobFingerprint
+        if (!charge || (!charge.charged && !charge.already_unlocked)) {
+            return res.status(402).json({
+                error: "No credits remaining. Please buy more credits to continue.",
+                noCredits: true
             });
-            const charge = Array.isArray(chargeRows) ? chargeRows[0] : chargeRows;
-
-            if (!charge || (!charge.charged && !charge.already_unlocked)) {
-                return res.status(402).json({
-                    error: "No credits remaining. Please buy more credits to continue.",
-                    noCredits: true
-                });
-            }
-            creditsRemainingForResponse = charge.credits;
         }
 
         const weakInputInstruction = validation.weak
@@ -901,8 +848,7 @@ ${trimmedJD}
             parsed.inputNote = "Tip: Adding more CV or job description detail can improve personalisation.";
         }
 
-        parsed.creditsRemaining = creditsRemainingForResponse;
-        parsed.wasRegeneration = !!regenCheck.isRegeneration;
+        parsed.creditsRemaining = charge.credits;
 
         res.json(parsed);
 
@@ -938,32 +884,19 @@ app.post("/generate-star", async (req, res) => {
         const providedCompany = getCompany(company);
         const hasCompany = providedCompany.length > 1;
 
-        // ── Regeneration check first, same pattern as /generate-interview.
+        // ── Atomic credit charge — same job-fingerprint scheme as /generate-interview.
         const jobFingerprint = getJobFingerprint(trimmedJD, providedCompany);
-        const regenCheck = await checkRegenerationOrBundle(req.googleUser.email, jobFingerprint, "star");
+        const chargeRows = await supabaseRpc("charge_credit_for_job", {
+            p_email: req.googleUser.email,
+            p_job_fingerprint: jobFingerprint
+        });
+        const charge = Array.isArray(chargeRows) ? chargeRows[0] : chargeRows;
 
-        if (regenCheck.blocked) {
-            return res.status(402).json({ error: regenCheck.error, noCredits: true });
-        }
-
-        let creditsRemainingForResponse = null;
-        if (regenCheck.charged) {
-            creditsRemainingForResponse = regenCheck.creditsRemaining;
-        } else {
-            // ── Atomic credit charge — same job-fingerprint scheme as /generate-interview.
-            const chargeRows = await supabaseRpc("charge_credit_for_job", {
-                p_email: req.googleUser.email,
-                p_job_fingerprint: jobFingerprint
+        if (!charge || (!charge.charged && !charge.already_unlocked)) {
+            return res.status(402).json({
+                error: "No credits remaining. Please buy more credits to continue.",
+                noCredits: true
             });
-            const charge = Array.isArray(chargeRows) ? chargeRows[0] : chargeRows;
-
-            if (!charge || (!charge.charged && !charge.already_unlocked)) {
-                return res.status(402).json({
-                    error: "No credits remaining. Please buy more credits to continue.",
-                    noCredits: true
-                });
-            }
-            creditsRemainingForResponse = charge.credits;
         }
 
         const weakInputInstruction = validation.weak
@@ -1067,8 +1000,7 @@ ${trimmedJD}
             parsed.inputNote = "Tip: Adding more CV or job description detail can improve personalisation.";
         }
 
-        parsed.creditsRemaining = creditsRemainingForResponse;
-        parsed.wasRegeneration = !!regenCheck.isRegeneration;
+        parsed.creditsRemaining = charge.credits;
 
         res.json(parsed);
 
@@ -1103,32 +1035,19 @@ app.post("/generate-docs", async (req, res) => {
         const { trimmedCV, trimmedJD } = trimInputs(cv, jd);
         const providedCompany = getCompany(company);
 
-        // ── Regeneration check first, same pattern as the other two routes.
+        // ── Atomic credit charge — same job-fingerprint scheme as the other two routes.
         const jobFingerprint = getJobFingerprint(trimmedJD, providedCompany);
-        const regenCheck = await checkRegenerationOrBundle(req.googleUser.email, jobFingerprint, "docs");
+        const chargeRows = await supabaseRpc("charge_credit_for_job", {
+            p_email: req.googleUser.email,
+            p_job_fingerprint: jobFingerprint
+        });
+        const charge = Array.isArray(chargeRows) ? chargeRows[0] : chargeRows;
 
-        if (regenCheck.blocked) {
-            return res.status(402).json({ error: regenCheck.error, noCredits: true });
-        }
-
-        let creditsRemainingForResponse = null;
-        if (regenCheck.charged) {
-            creditsRemainingForResponse = regenCheck.creditsRemaining;
-        } else {
-            // ── Atomic credit charge — same job-fingerprint scheme as the other two routes.
-            const chargeRows = await supabaseRpc("charge_credit_for_job", {
-                p_email: req.googleUser.email,
-                p_job_fingerprint: jobFingerprint
+        if (!charge || (!charge.charged && !charge.already_unlocked)) {
+            return res.status(402).json({
+                error: "No credits remaining. Please buy more credits to continue.",
+                noCredits: true
             });
-            const charge = Array.isArray(chargeRows) ? chargeRows[0] : chargeRows;
-
-            if (!charge || (!charge.charged && !charge.already_unlocked)) {
-                return res.status(402).json({
-                    error: "No credits remaining. Please buy more credits to continue.",
-                    noCredits: true
-                });
-            }
-            creditsRemainingForResponse = charge.credits;
         }
 
         const weakInputInstruction = validation.weak
@@ -1186,8 +1105,7 @@ ${trimmedJD}
             parsed.inputNote = "Tip: Adding more CV or job description detail can improve personalisation.";
         }
 
-        parsed.creditsRemaining = creditsRemainingForResponse;
-        parsed.wasRegeneration = !!regenCheck.isRegeneration;
+        parsed.creditsRemaining = charge.credits;
 
         res.json(parsed);
 
@@ -1595,40 +1513,6 @@ app.post("/credits", requireApiToken, verifyGoogleUser, async (req, res) => {
 });
 
 // ── List all job sessions for the signed-in user ──
-// ── Check whether a specific section has already been generated for this
-// job before — lets the frontend show an accurate "this will cost a credit"
-// warning before regenerating, rather than only finding out after the fact.
-app.post("/jobs/generation-status", requireApiToken, verifyGoogleUser, async (req, res) => {
-    try {
-        const { jd, company, sectionType } = req.body || {};
-        if (!["interview", "star", "docs"].includes(sectionType)) {
-            return res.status(400).json({ error: "Invalid section type." });
-        }
-
-        const users = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(req.googleUser.email)}&select=id`);
-        if (!users || users.length === 0) {
-            return res.json({ success: true, alreadyGenerated: false });
-        }
-
-        const { trimmedJD } = trimInputs("", jd);
-        const sanitizedCompany = getCompany(company);
-        const jobFingerprint = getJobFingerprint(trimmedJD, sanitizedCompany);
-
-        const existing = await supabaseFetch(
-            `/rest/v1/job_sessions?user_id=eq.${users[0].id}&job_fingerprint=eq.${encodeURIComponent(jobFingerprint)}&select=generated_interview,generated_star,generated_docs`
-        );
-        const row = existing && existing[0];
-        const alreadyGenerated = !!(row && row["generated_" + sectionType]);
-
-        res.json({ success: true, alreadyGenerated });
-    } catch (err) {
-        console.error("generation-status check error:", err);
-        // Fail safe — if this check itself fails, don't block generation,
-        // just skip showing the regeneration-specific warning this time.
-        res.json({ success: false, alreadyGenerated: false });
-    }
-});
-
 app.post("/sessions/list", requireApiToken, verifyGoogleUser, async (req, res) => {
     try {
         const users = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(req.googleUser.email)}&select=id`);
