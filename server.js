@@ -1553,19 +1553,27 @@ app.post("/sessions/save", requireApiToken, verifyGoogleUser, async (req, res) =
 
         if (existing && existing.length > 0) {
             const session = existing[0];
+
+            // Only include fields that were actually provided in THIS
+            // request — never merge in previously-read values for fields
+            // we're not touching. This is what makes the update atomic and
+            // race-free: two overlapping saves (e.g. generating Interview
+            // and STAR moments apart) can no longer clobber each other,
+            // since neither one ever writes back a stale value for a field
+            // the other is actively updating.
+            const patchBody = { job_fingerprint: jobFingerprint };
+            if (generated_interview !== undefined) patchBody.generated_interview = generated_interview;
+            if (generated_star !== undefined) patchBody.generated_star = generated_star;
+            if (generated_docs !== undefined) patchBody.generated_docs = generated_docs;
+            if (credit_used !== undefined) patchBody.credit_used = credit_used;
+            if (jd) patchBody.jd_full = jd;
+            if (answers_interview !== undefined) patchBody.answers_interview = answers_interview;
+            if (answers_star !== undefined) patchBody.answers_star = answers_star;
+            if (answers_docs !== undefined) patchBody.answers_docs = answers_docs;
+
             const updated = await supabaseFetch(`/rest/v1/job_sessions?id=eq.${session.id}`, {
                 method: "PATCH",
-                body: JSON.stringify({
-                    generated_interview: generated_interview ?? session.generated_interview,
-                    generated_star: generated_star ?? session.generated_star,
-                    generated_docs: generated_docs ?? session.generated_docs,
-                    credit_used: credit_used ?? session.credit_used,
-                    jd_full: jd || session.jd_full || "",
-                    job_fingerprint: jobFingerprint,
-                    answers_interview: answers_interview !== undefined ? answers_interview : session.answers_interview,
-                    answers_star: answers_star !== undefined ? answers_star : session.answers_star,
-                    answers_docs: answers_docs !== undefined ? answers_docs : session.answers_docs
-                })
+                body: JSON.stringify(patchBody)
             });
             return res.json({ success: true, session: Array.isArray(updated) ? updated[0] : updated });
         }
