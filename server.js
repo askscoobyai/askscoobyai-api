@@ -492,6 +492,40 @@ async function callClaude(prompt, maxTokens = 2500, model = "claude-haiku-4-5-20
     return JSON.parse(cleaned);
 }
 
+// ── Video delivery analysis — entirely separate from callClaude() above.
+// Uses Claude's vision capability on a handful of still frames. Deliberately
+// isolated: this can fail independently without ever affecting the main
+// text-based feedback, since visual delivery assessment from sparse frames
+// is a much less proven capability than the established scoring above.
+async function analyzeVideoDelivery(videoFrames, transcript) {
+    const content = [
+        {
+            type: "text",
+            text: `You are giving brief, supportive delivery-style observations for someone practicing an interview answer on video. Here is what they said (for context only — do not re-grade the content, only comment on visual delivery):
+
+"${transcript.slice(0, 1500)}"
+
+Below are 10 still frames sampled at even intervals across their answer — not continuous video, so anything that happened between frames wasn't captured. Based only on what's visible across these frames (posture, eye contact/camera engagement, facial expression, any visible nervous habits), write 2-4 short, constructive sentences of delivery feedback. Be encouraging and specific where the frames genuinely show something, but don't overstate your confidence — this is a sparse sample, not continuous observation. Do not invent details you can't actually see, and don't claim to have observed something continuous (like "maintained eye contact throughout") when you've only seen isolated snapshots. Return ONLY the feedback text, no JSON, no headers, no markdown.`
+        }
+    ];
+
+    videoFrames.forEach(frame => {
+        content.push({
+            type: "image",
+            source: { type: "base64", media_type: "image/jpeg", data: frame }
+        });
+    });
+
+    const response = await anthropic.messages.create({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 300,
+        temperature: 0.4,
+        messages: [{ role: "user", content }]
+    });
+
+    return response.content[0].text.trim();
+}
+
 function buildFallbackIntroQuestion() {
     return {
         question: "Thanks for joining us today. Could you start by telling me a little about yourself and your background?",
@@ -1242,7 +1276,8 @@ app.post("/generate-practice-feedback", async (req, res) => {
             contextType,
             cv,
             jd,
-            company
+            company,
+            videoFrames
         } = req.body;
 
         const safeQuestion = cleanText(question).slice(0, 1000);
@@ -1439,6 +1474,17 @@ Feedback rules:
                 });
         } catch (saveErr) {
             console.error("practice-feedback: failed to save session (non-fatal):", saveErr);
+        }
+
+        // ── Optional video delivery analysis — fully isolated. If this
+        // fails for any reason, the main feedback above is completely
+        // unaffected and still gets returned normally.
+        if (Array.isArray(videoFrames) && videoFrames.length > 0) {
+            try {
+                parsed.deliveryNotes = await analyzeVideoDelivery(videoFrames, safeTranscript);
+            } catch (visionErr) {
+                console.error("practice-feedback: video delivery analysis failed (non-fatal):", visionErr);
+            }
         }
 
         parsed.freeSessionsRemaining = Math.max(0, FREE_PRACTICE_TOTAL - (totalSessionsUsed + 1));
