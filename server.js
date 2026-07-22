@@ -505,7 +505,24 @@ async function analyzeVideoDelivery(videoFrames, transcript) {
 
 "${transcript.slice(0, 1500)}"
 
-Below are 10 still frames sampled at even intervals across their answer — not continuous video, so anything that happened between frames wasn't captured. Based only on what's visible across these frames (posture, eye contact/camera engagement, facial expression, any visible nervous habits), write 2-4 short, constructive sentences of delivery feedback. Be encouraging and specific where the frames genuinely show something, but don't overstate your confidence — this is a sparse sample, not continuous observation. Do not invent details you can't actually see, and don't claim to have observed something continuous (like "maintained eye contact throughout") when you've only seen isolated snapshots. Return ONLY the feedback text, no JSON, no headers, no markdown.`
+Below are 10 still frames sampled at even intervals across their answer — not continuous video, so anything that happened between frames wasn't captured.
+
+Return ONLY valid JSON (no markdown, no code fences) with this exact structure:
+{
+  "posture": "string or null",
+  "eyeContact": "string or null",
+  "expression": "string or null",
+  "overall": "string or null"
+}
+
+Rules:
+- posture: 1 short sentence on posture/body positioning, if genuinely visible across frames. Otherwise null.
+- eyeContact: 1 short sentence on camera engagement/eye contact, if genuinely visible. Otherwise null.
+- expression: 1 short sentence on facial expression/engagement, if genuinely visible. Otherwise null.
+- overall: 1 short, encouraging general observation or tip, if there's something worth saying. Otherwise null.
+- Be encouraging and specific where the frames genuinely show something, but don't overstate your confidence — this is a sparse sample, not continuous observation.
+- Do not invent details you can't actually see, and don't claim to have observed something continuous (like "maintained eye contact throughout") when you've only seen isolated snapshots.
+- Use null for any category where the frames don't give you enough to say something genuine and specific — do not pad with generic filler.`
         }
     ];
 
@@ -518,12 +535,14 @@ Below are 10 still frames sampled at even intervals across their answer — not 
 
     const response = await anthropic.messages.create({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 300,
+        max_tokens: 400,
         temperature: 0.4,
         messages: [{ role: "user", content }]
     });
 
-    return response.content[0].text.trim();
+    const text = response.content[0].text.trim();
+    const cleaned = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim();
+    return JSON.parse(cleaned);
 }
 
 function buildFallbackIntroQuestion() {
