@@ -512,6 +512,9 @@ Return ONLY valid JSON (no markdown, no code fences) with this exact structure:
   "posture": "string or null",
   "eyeContact": "string or null",
   "expression": "string or null",
+  "gestures": "string or null",
+  "framing": "string or null",
+  "background": "string or null",
   "overall": "string or null"
 }
 
@@ -519,9 +522,13 @@ Rules:
 - posture: 1 short sentence on posture/body positioning, if genuinely visible across frames. Otherwise null.
 - eyeContact: 1 short sentence on camera engagement/eye contact, if genuinely visible. Otherwise null.
 - expression: 1 short sentence on facial expression/engagement, if genuinely visible. Otherwise null.
+- gestures: 1 short sentence on hand gestures/visibility, if hands are visible and there's something genuine to note. Otherwise null.
+- framing: 1 short, practical sentence on camera framing/positioning (e.g. too close, too far, off-center, well-framed), if genuinely assessable. Otherwise null.
+- background: 1 short, practical sentence on the background/setting (e.g. distracting, cluttered, clean and professional), if genuinely assessable. Otherwise null.
 - overall: 1 short, encouraging general observation or tip, if there's something worth saying. Otherwise null.
 - Be encouraging and specific where the frames genuinely show something, but don't overstate your confidence — this is a sparse sample, not continuous observation.
 - Do not invent details you can't actually see, and don't claim to have observed something continuous (like "maintained eye contact throughout") when you've only seen isolated snapshots.
+- Never comment on clothing, appearance, physical attributes, or anything unrelated to positioning/setting/expression/gestures — stay strictly practical and professional.
 - Use null for any category where the frames don't give you enough to say something genuine and specific — do not pad with generic filler.`
         }
     ];
