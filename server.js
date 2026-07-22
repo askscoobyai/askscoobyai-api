@@ -1600,6 +1600,37 @@ app.post("/credits", requireApiToken, verifyGoogleUser, async (req, res) => {
 });
 
 // ── List all job sessions for the signed-in user ──
+// ── Check whether a specific section has already been generated for this
+// job before — lets the frontend show an accurate "this will cost a credit"
+// warning before regenerating, rather than only finding out after the fact.
+app.post("/jobs/generation-status", requireApiToken, verifyGoogleUser, async (req, res) => {
+    try {
+        const { jd, sectionType } = req.body || {};
+        if (!["interview", "star", "docs"].includes(sectionType)) {
+            return res.status(400).json({ error: "Invalid section type." });
+        }
+
+        const users = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(req.googleUser.email)}&select=id`);
+        if (!users || users.length === 0) {
+            return res.json({ success: true, alreadyGenerated: false });
+        }
+
+        const jdSnippet = String(jd || "").slice(0, 500);
+        const existing = await supabaseFetch(
+            `/rest/v1/job_sessions?user_id=eq.${users[0].id}&jd_snippet=eq.${encodeURIComponent(jdSnippet)}&select=generated_interview,generated_star,generated_docs`
+        );
+        const row = existing && existing[0];
+        const alreadyGenerated = !!(row && row["generated_" + sectionType]);
+
+        res.json({ success: true, alreadyGenerated });
+    } catch (err) {
+        console.error("generation-status check error:", err);
+        // Fail safe — if this check itself fails, don't block generation,
+        // just skip showing the regeneration-specific warning this time.
+        res.json({ success: false, alreadyGenerated: false });
+    }
+});
+
 app.post("/sessions/list", requireApiToken, verifyGoogleUser, async (req, res) => {
     try {
         const users = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(req.googleUser.email)}&select=id`);
