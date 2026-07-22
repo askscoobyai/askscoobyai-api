@@ -1645,12 +1645,24 @@ app.post("/jobs/generation-status", requireApiToken, verifyGoogleUser, async (re
         const jobFingerprint = getJobFingerprint(trimmedJD, sanitizedCompany);
 
         const existing = await supabaseFetch(
-            `/rest/v1/job_sessions?user_id=eq.${users[0].id}&job_fingerprint=eq.${encodeURIComponent(jobFingerprint)}&select=generated_interview,generated_star,generated_docs`
+            `/rest/v1/job_sessions?user_id=eq.${users[0].id}&job_fingerprint=eq.${encodeURIComponent(jobFingerprint)}&select=generated_interview,generated_star,generated_docs,regen_used_interview,regen_used_star,regen_used_docs`
         );
         const row = existing && existing[0];
         const alreadyGenerated = !!(row && row["generated_" + sectionType]);
 
-        res.json({ success: true, alreadyGenerated });
+        // Would this specific regeneration actually be free? True if this
+        // exact section hasn't used its turn yet AND another section has
+        // already started an active paid round this section can ride along
+        // on — mirrors the same logic the actual charge decision uses.
+        let wouldBeFree = false;
+        if (row) {
+            const otherTypes = ["interview", "star", "docs"].filter(t => t !== sectionType);
+            const alreadyUsedThisType = row["regen_used_" + sectionType] === true;
+            const roundActive = otherTypes.some(t => row["regen_used_" + t] === true);
+            wouldBeFree = roundActive && !alreadyUsedThisType;
+        }
+
+        res.json({ success: true, alreadyGenerated, wouldBeFree });
     } catch (err) {
         console.error("generation-status check error:", err);
         // Fail safe — if this check itself fails, don't block generation,
