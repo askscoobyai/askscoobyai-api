@@ -1484,6 +1484,18 @@ Feedback rules:
             parsed.improvedAnswer = "";
         }
 
+        // ── Optional video delivery analysis — fully isolated. If this
+        // fails for any reason, the main feedback above is completely
+        // unaffected and still gets returned normally. Runs BEFORE the save
+        // below, so deliveryNotes makes it into what gets persisted.
+        if (Array.isArray(videoFrames) && videoFrames.length > 0) {
+            try {
+                parsed.deliveryNotes = await analyzeVideoDelivery(videoFrames, safeTranscript);
+            } catch (visionErr) {
+                console.error("practice-feedback: video delivery analysis failed (non-fatal):", visionErr);
+            }
+        }
+
         // Save this attempt for My Progress — doesn't block or fail the
         // response if it errors, since the feedback itself already succeeded.
         try {
@@ -1509,23 +1521,14 @@ Feedback rules:
                             improvements: parsed.improvements || null,
                             structure_feedback: parsed.structureFeedback || null,
                             technical_depth_feedback: parsed.technicalDepthFeedback || null,
-                            delivery_feedback: parsed.deliveryFeedback || null
+                            delivery_feedback: parsed.deliveryFeedback || null,
+                            delivery_breakdown: parsed.deliveryBreakdown || null,
+                            delivery_notes: parsed.deliveryNotes || null
                         })
                     });
                 });
         } catch (saveErr) {
             console.error("practice-feedback: failed to save session (non-fatal):", saveErr);
-        }
-
-        // ── Optional video delivery analysis — fully isolated. If this
-        // fails for any reason, the main feedback above is completely
-        // unaffected and still gets returned normally.
-        if (Array.isArray(videoFrames) && videoFrames.length > 0) {
-            try {
-                parsed.deliveryNotes = await analyzeVideoDelivery(videoFrames, safeTranscript);
-            } catch (visionErr) {
-                console.error("practice-feedback: video delivery analysis failed (non-fatal):", visionErr);
-            }
         }
 
         parsed.freeSessionsRemaining = Math.max(0, FREE_PRACTICE_TOTAL - (totalSessionsUsed + 1));
