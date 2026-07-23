@@ -505,7 +505,9 @@ async function analyzeVideoDelivery(videoFrames, transcript) {
 
 "${transcript.slice(0, 1500)}"
 
-Below are 10 still frames sampled at even intervals across their answer — not continuous video, so anything that happened between frames wasn't captured.
+Below are 10 still frames sampled at even intervals across their answer, in chronological order (frame 1 = start of answer, frame 10 = end) — not continuous video, so anything that happened between frames wasn't captured.
+
+Actively compare the EARLY frames (1-3) against the LATER frames (8-10) for each category — did something change over the course of the answer (e.g. posture relaxing or slouching as they went on, eye contact dropping or improving, energy fading or building)? A genuine trend across the answer is more specific and useful than a single averaged impression of "how you looked overall" — prioritize noting real change where you see it, rather than defaulting to a static summary.
 
 Return ONLY valid JSON (no markdown, no code fences) with this exact structure:
 {
@@ -519,9 +521,9 @@ Return ONLY valid JSON (no markdown, no code fences) with this exact structure:
 }
 
 Rules:
-- posture: 1 short sentence on posture/body positioning, if genuinely visible across frames. Otherwise null.
-- eyeContact: 1 short sentence on camera engagement/eye contact, if genuinely visible. Otherwise null.
-- expression: 1 short sentence on facial expression/engagement, if genuinely visible. Otherwise null.
+- posture: 1 short sentence on posture/body positioning — note any change from early to late frames if genuinely visible, otherwise a general observation. Otherwise null.
+- eyeContact: 1 short sentence on camera engagement/eye contact — note any change across the answer if visible. Otherwise null.
+- expression: 1 short sentence on facial expression/engagement — note any change across the answer if visible. Otherwise null.
 - gestures: 1 short sentence on hand gestures/visibility, if hands are visible and there's something genuine to note. Otherwise null.
 - framing: 1 short, practical sentence on camera framing/positioning (e.g. too close, too far, off-center, well-framed), if genuinely assessable. Otherwise null.
 - background: 1 short, practical sentence on the background/setting (e.g. distracting, cluttered, clean and professional), if genuinely assessable. Otherwise null.
@@ -543,7 +545,7 @@ Rules:
     const response = await anthropic.messages.create({
         model: "claude-haiku-4-5-20251001",
         max_tokens: 400,
-        temperature: 0.4,
+        temperature: 0.7,
         messages: [{ role: "user", content }]
     });
 
