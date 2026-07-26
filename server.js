@@ -2097,11 +2097,18 @@ app.post("/scooby-coach/generate", requireApiToken, verifyGoogleUser, async (req
         // stale frontend state (or a direct API call) could bypass it
         // entirely and still charge a credit. Now genuinely enforced.
         const lastAnalysisRows = await supabaseFetch(
-            `/rest/v1/scooby_coach_analyses?user_id=eq.${userId}&order=created_at.desc&limit=1&select=sessions_analyzed`
+            `/rest/v1/scooby_coach_analyses?user_id=eq.${userId}&order=created_at.desc&limit=1&select=total_sessions_at_generation,sessions_analyzed`
         );
         const lastAnalysis = lastAnalysisRows && lastAnalysisRows[0];
         if (lastAnalysis) {
-            const newSessionsSinceLast = allSessions.length - lastAnalysis.sessions_analyzed;
+            // Compare against the TRUE total from last time, not the capped
+            // sessions_analyzed count — using the capped number caused a
+            // real bug: someone with 25+ total sessions would always show
+            // a false "5 new sessions" gap (25 - 20 cap = 5) even with zero
+            // actual new activity. Falls back to sessions_analyzed only for
+            // rows saved before this fix existed.
+            const previousTrueTotal = lastAnalysis.total_sessions_at_generation ?? lastAnalysis.sessions_analyzed;
+            const newSessionsSinceLast = allSessions.length - previousTrueTotal;
             if (newSessionsSinceLast < SCOOBY_COACH_MIN_SESSIONS) {
                 return res.status(400).json({
                     error: `Complete ${SCOOBY_COACH_MIN_SESSIONS - newSessionsSinceLast} more session(s) before generating a new analysis — you've done ${newSessionsSinceLast} new session(s) since your last one.`
@@ -2144,6 +2151,8 @@ Improvements noted: ${Array.isArray(s.improvements) ? s.improvements.join(" | ")
 
         const prompt = `You are Scooby Coach, an encouraging AI interview coach reviewing a job seeker's mock interview practice history.
 
+You are analyzing EXACTLY ${recentSessions.length} practice sessions, numbered 1 to ${recentSessions.length} below. Whenever you reference "how many sessions" in your response (e.g. "across all X sessions"), you MUST use this exact number (${recentSessions.length}) — never guess, round, or default to a different figure.
+
 Practice history (oldest to newest):
 ${sessionSummaries}
 
@@ -2179,6 +2188,7 @@ ${anyVideoSessions ? "" : "Note: no sessions in this history used video, so vide
             body: JSON.stringify({
                 user_id: userId,
                 sessions_analyzed: recentSessions.length,
+                total_sessions_at_generation: allSessions.length,
                 trend_analysis: parsed.trendAnalysis || null,
                 recurring_themes: parsed.recurringThemes || null,
                 action_plan: parsed.actionPlan || null,
