@@ -2012,31 +2012,6 @@ const SCOOBY_COACH_MIN_SESSIONS = 5;
 
 // Free — just checks unlock status and returns the last cached analysis,
 // if one exists. Viewing/revisiting never costs a credit.
-// ── Which questions have already been practiced for a given job ──
-app.post("/practice-sessions/practiced-questions", requireApiToken, verifyGoogleUser, async (req, res) => {
-    try {
-        const { jd, company } = req.body || {};
-        const users = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(req.googleUser.email)}&select=id`);
-        if (!users || users.length === 0) {
-            return res.json({ success: true, practicedQuestions: [] });
-        }
-
-        const { trimmedJD } = trimInputs("", jd);
-        const sanitizedCompany = getCompany(company);
-        const jobFingerprint = getJobFingerprint(trimmedJD, sanitizedCompany);
-
-        const sessions = await supabaseFetch(
-            `/rest/v1/practice_sessions?user_id=eq.${users[0].id}&job_fingerprint=eq.${encodeURIComponent(jobFingerprint)}&select=question`
-        );
-        const practicedQuestions = [...new Set((sessions || []).map(s => s.question).filter(Boolean))];
-
-        res.json({ success: true, practicedQuestions });
-    } catch (err) {
-        console.error("practiced-questions check error:", err);
-        res.json({ success: false, practicedQuestions: [] });
-    }
-});
-
 app.post("/practice-sessions/free-remaining", requireApiToken, verifyGoogleUser, async (req, res) => {
     try {
         const FREE_PRACTICE_TOTAL = 20;
