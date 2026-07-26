@@ -1987,20 +1987,31 @@ app.get("/terms", (req, res) => {
             <li>We do not control, and are not responsible for, the accuracy of this third-party transcription service.</li>
         </ul>
 
-        <h2>5. Credits and Payments</h2>
+        <h2>5. Camera, Video, and AI Voice Features</h2>
+        <p>AI Mock Interview offers optional features that involve your camera and voice, in addition to the text transcription described above.</p>
         <ul>
-            <li>Credits are consumed when you use certain features: Interview Q&amp;A, STAR Answers, Cover Letter &amp; CV generation, and Scooby Coach analysis all cost 1 credit. AI Mock Interview practice feedback is free for your first 20 sessions (across your whole account); after that, 1 credit unlocks each next block of 5 practice sessions.</li>
+            <li><strong>Camera access is entirely optional and requires your explicit choice before each practice session</strong> — it is never enabled automatically. If you choose not to enable it, none of what follows in this section applies to you.</li>
+            <li>When enabled, your browser records video locally on your own device for you to watch back immediately after your practice answer, for your own review of body language and delivery.</li>
+            <li><strong>This video is never uploaded to, or stored on, AskScoobyAI's servers or database.</strong> It exists only temporarily in your browser and is permanently gone once you navigate away from the page — if you want to keep a copy, you must download it yourself using the player's own controls before leaving.</li>
+            <li>If you request AI feedback on a video session, a small number of still images sampled from your recording (not the continuous video itself) are sent to Anthropic's Claude to generate "Video Delivery Notes" — an experimental, beta feature. These images are processed to generate that feedback and are not retained by us afterward.</li>
+            <li><strong>Video Delivery Notes are based on sparse still frames, not continuous observation, and should be treated as a rough supplementary pointer, not a reliable or certified assessment of your delivery, posture, or body language.</strong> This feedback is entirely separate from — and does not affect — your Structure, Technical Depth, or Verbal Delivery scores.</li>
+            <li>Recorded video has no audio track. Any voice you hear during a practice session (the question being read aloud, or a short spoken feedback summary afterward) is separately generated using ElevenLabs' text-to-speech service, not a recording of your own voice.</li>
+        </ul>
+
+        <h2>6. Credits and Payments</h2>
+        <ul>
+            <li>Credits are consumed when you use certain features: Interview Q&amp;A, STAR Answers, Cover Letter &amp; CV generation, and Scooby Coach analysis all cost 1 credit. AI Mock Interview practice feedback is free for your first 20 sessions (across your whole account); after that, 1 credit unlocks each next block of 5 practice sessions — this applies whether or not video or voice features are used during those sessions.</li>
             <li>Credits are non-refundable except where required by applicable consumer protection law.</li>
             <li>Payments are processed by Stripe. We do not store your payment card details.</li>
         </ul>
 
-        <h2>6. Third-Party Services</h2>
+        <h2>7. Third-Party Services</h2>
         <p>AskScoobyAI relies on third-party infrastructure and AI providers, including Anthropic, ElevenLabs, Google, Supabase, Stripe, and Render. We are not responsible for outages, errors, or changes in behavior originating from these third parties.</p>
 
-        <h2>7. Limitation of Liability</h2>
+        <h2>8. Limitation of Liability</h2>
         <p>To the maximum extent permitted by applicable law, AskScoobyAI shall not be liable for any indirect, incidental, special, consequential, or punitive damages arising from your use of the service. Nothing in this disclaimer excludes or limits liability that cannot lawfully be excluded under the laws applicable to you.</p>
 
-        <h2>8. Changes</h2>
+        <h2>9. Changes</h2>
         <p>We may update these terms from time to time. Continued use of AskScoobyAI after changes are posted constitutes acceptance of the updated terms.</p>
 
         <p class="updated">Last updated: ${new Date().toISOString().slice(0, 10)}</p>
