@@ -2105,9 +2105,12 @@ app.post("/scooby-coach/generate", requireApiToken, verifyGoogleUser, async (req
             // sessions_analyzed count — using the capped number caused a
             // real bug: someone with 25+ total sessions would always show
             // a false "5 new sessions" gap (25 - 20 cap = 5) even with zero
-            // actual new activity. Falls back to sessions_analyzed only for
-            // rows saved before this fix existed.
-            const previousTrueTotal = lastAnalysis.total_sessions_at_generation ?? lastAnalysis.sessions_analyzed;
+            // actual new activity. For a row saved BEFORE this fix existed
+            // (total_sessions_at_generation is null), we have no accurate
+            // baseline at all — rather than fall back to the same buggy
+            // capped comparison, conservatively require a full 5 fresh
+            // sessions starting now.
+            const previousTrueTotal = lastAnalysis.total_sessions_at_generation ?? allSessions.length;
             const newSessionsSinceLast = allSessions.length - previousTrueTotal;
             if (newSessionsSinceLast < SCOOBY_COACH_MIN_SESSIONS) {
                 return res.status(400).json({
@@ -2176,10 +2179,10 @@ Return ONLY this exact JSON structure, no markdown, no preamble:
   "mostNeededImprovement": "1-2 sentences on the single most important thing to focus on next — the one change that would help the most.",
   "recurringThemes": ["2-4 specific patterns noticed repeatedly across multiple sessions' feedback, phrased constructively"],
   "actionPlan": ["3-4 concrete, specific next steps tailored to what was found, phrased encouragingly"],
-  "videoDeliveryTrend": ${anyVideoSessions ? '"2-3 sentences on patterns across their Video Delivery Notes where video was used — posture, eye contact, expression trends across sessions."' : "null"}
+  "videoDeliveryTrend": "string or null"
 }
 
-${anyVideoSessions ? "" : "Note: no sessions in this history used video, so videoDeliveryTrend must be null — do not invent video observations that weren't provided."}`;
+- videoDeliveryTrend: ${anyVideoSessions ? "2-3 sentences on patterns across their Video Delivery Notes — posture, eye contact, expression trends across sessions." : "no sessions in this history used video, so this MUST be the literal JSON value null, not a string — do not invent video observations that weren't provided."}`;
 
         const parsed = await callClaude(prompt, 1600, "claude-sonnet-4-6");
 
