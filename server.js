@@ -1208,11 +1208,27 @@ app.post("/generate-question-audio", async (req, res) => {
         // ever recording. Hitting this cap fails into the extension's
         // existing browser-voice fallback rather than showing an error.
         const TTS_DAILY_LIMIT = 50;
+        // ── Daily cap, GLOBAL across all users ── protects the shared
+        // monthly ElevenLabs budget itself. The per-user cap alone doesn't
+        // stop combined usage across many users from outpacing what the
+        // plan actually supports in a day — this does. Set at roughly 3x
+        // the sustainable daily average, so normal busier days aren't
+        // affected, but no single day can burn an outsized chunk of the
+        // month's shared pool.
+        const TTS_GLOBAL_DAILY_LIMIT = 100;
         let ttsRemainingToday = null;
         try {
+            const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+            const globalUsage = await supabaseFetch(
+                `/rest/v1/tts_usage?created_at=gte.${encodeURIComponent(since)}&select=id`
+            );
+            if ((globalUsage || []).length >= TTS_GLOBAL_DAILY_LIMIT) {
+                return res.status(429).json({ error: "Daily voice generation limit reached (shared across all users)." });
+            }
+
             const users = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(req.googleUser.email)}&select=id`);
             if (users && users.length > 0) {
-                const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
                 const todaysUsage = await supabaseFetch(
                     `/rest/v1/tts_usage?user_id=eq.${users[0].id}&created_at=gte.${encodeURIComponent(since)}&select=id`
                 );
@@ -1384,8 +1400,11 @@ Use this exact JSON structure:
     "confidence": "string or null",
     "clarity": "string or null"
   },
-  "improvedAnswer": "string"
+  "improvedAnswer": "string",
+  "verbalWrapUp": "string"
 }
+
+- verbalWrapUp: a SHORT, warm, spoken-style wrap-up meant to be read aloud — one sentence, max ~20 words. Should feel like a friendly interviewer briefly commenting after your answer (e.g. "Nice work — your structure was strong, just watch your pacing next time."), not a repeat of the full summary. Pick the single most useful takeaway, not everything.
 
 Context:
 - Practice type: ${safeContextType || "interview"}
@@ -1415,6 +1434,7 @@ Feedback philosophy:
 - In that case, focus feedback on delivery, clarity, confidence, pacing, conciseness, and sounding natural.
 - Do not criticise the answer for lacking examples, structure, or technical depth if the candidate closely repeated the provided reference answer.
 - Do not generate contradictory feedback that says the provided reference answer needs more content unless it is genuinely incomplete.
+- However, if the transcript meaningfully DIVERGES from the reference answer (the candidate improvised their own different content rather than reciting it), independently assess THAT content on its own merits — is it technically accurate, does it genuinely address the question, is it well-suited to the job description and CV context — rather than only checking whether it matches the reference. Technical Depth and Structure scores should reflect the actual quality of what was said, not just how closely it tracks the reference answer, whenever the candidate has gone their own way.
 - The improvedAnswer field should be empty if the answer is already strong and no major content rewrite is needed.
 
 Scoring rules:
