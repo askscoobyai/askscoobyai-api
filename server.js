@@ -1482,7 +1482,7 @@ Feedback rules:
 - If no rewrite is needed, improvedAnswer must be an empty string.
 - Do not ask the user to add specific examples, metrics, achievements, tools, or extra detail if the transcript closely follows the generated reference answer.
 - If the reference answer itself is general, do not criticise the user for repeating it. Focus on delivery, confidence, pacing, and clarity instead.
-- Technical depth feedback should only assess whether the user clearly communicated the technical content already present in the reference answer.
+- Technical depth feedback: when the transcript closely follows the reference answer, only assess whether the user clearly communicated the technical content already present in it. When the transcript meaningfully diverges (the candidate improvised different content), assess that content's own technical accuracy and job-fit instead — same distinction as above, applied specifically to this feedback field.
 - Avoid phrases like "provide specific examples", "add more achievements", "include metrics", or "give more detail" when the user practised the generated answer closely.
 - If more detail would genuinely help, phrase it gently as optional: "In a real interview, you could add one short example if you have one available."
 `;
