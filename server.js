@@ -2091,6 +2091,24 @@ app.post("/scooby-coach/generate", requireApiToken, verifyGoogleUser, async (req
             });
         }
 
+        // ── Server-side enforcement of "5 new sessions since last analysis"
+        // — this was previously only checked on the frontend (which could
+        // disable the button), but never actually verified here, meaning a
+        // stale frontend state (or a direct API call) could bypass it
+        // entirely and still charge a credit. Now genuinely enforced.
+        const lastAnalysisRows = await supabaseFetch(
+            `/rest/v1/scooby_coach_analyses?user_id=eq.${userId}&order=created_at.desc&limit=1&select=sessions_analyzed`
+        );
+        const lastAnalysis = lastAnalysisRows && lastAnalysisRows[0];
+        if (lastAnalysis) {
+            const newSessionsSinceLast = allSessions.length - lastAnalysis.sessions_analyzed;
+            if (newSessionsSinceLast < SCOOBY_COACH_MIN_SESSIONS) {
+                return res.status(400).json({
+                    error: `Complete ${SCOOBY_COACH_MIN_SESSIONS - newSessionsSinceLast} more session(s) before generating a new analysis — you've done ${newSessionsSinceLast} new session(s) since your last one.`
+                });
+            }
+        }
+
         // Atomic credit spend
         const spendRows = await supabaseRpc("spend_credit", {
             p_email: req.googleUser.email,
@@ -2108,12 +2126,20 @@ app.post("/scooby-coach/generate", requireApiToken, verifyGoogleUser, async (req
         // Cap to the most recent 20 sessions to keep the prompt bounded for
         // very frequent practicers, while still covering plenty of history.
         const recentSessions = allSessions.slice(-20);
+        const anyVideoSessions = recentSessions.some(s => s.delivery_notes);
 
         const sessionSummaries = recentSessions.map((s, i) => {
             const date = new Date(s.created_at).toISOString().slice(0, 10);
-            return `Session ${i + 1} (${date}) — Overall: ${s.overall_score}/10, Structure: ${s.structure_score}/10, Technical Depth: ${s.technical_depth_score}/10, Delivery: ${s.delivery_score}/10
+            let entry = `Session ${i + 1} (${date}) — Question: "${(s.question || "N/A").slice(0, 150)}"
+Overall: ${s.overall_score}/10, Structure: ${s.structure_score}/10, Technical Depth: ${s.technical_depth_score}/10, Verbal Delivery: ${s.delivery_score}/10
 Summary: ${s.summary_feedback || "N/A"}
 Improvements noted: ${Array.isArray(s.improvements) ? s.improvements.join(" | ") : "N/A"}`;
+            if (s.delivery_notes) {
+                const dn = s.delivery_notes;
+                const notes = [dn.posture, dn.eyeContact, dn.expression, dn.gestures, dn.framing, dn.background, dn.overall].filter(Boolean).join(" | ");
+                if (notes) entry += `\nVideo delivery notes: ${notes}`;
+            }
+            return entry;
         }).join("\n\n");
 
         const prompt = `You are Scooby Coach, an encouraging AI interview coach reviewing a job seeker's mock interview practice history.
@@ -2127,12 +2153,26 @@ Important constraint for the action plan: only suggest things achievable using A
 
 Return ONLY this exact JSON structure, no markdown, no preamble:
 {
-  "trendAnalysis": "2-3 sentences describing how their scores/skills have changed across sessions — be specific about direction (improving, plateauing, fluctuating) and which areas.",
+  "trendAnalysis": "2-3 sentences giving an overall summary of how they've changed across sessions — direction (improving, plateauing, fluctuating) at a glance.",
+  "categoryTrends": {
+    "structure": "1-2 sentences on how Structure specifically has trended across sessions.",
+    "technicalDepth": "1-2 sentences on how Technical Depth specifically has trended across sessions.",
+    "verbalDelivery": "1-2 sentences on how Verbal Delivery specifically has trended across sessions."
+  },
+  "sessionCallouts": {
+    "strongest": "Reference a SPECIFIC session by its question topic and date as their strongest example to revisit, and briefly say why.",
+    "weakest": "Reference a SPECIFIC session by its question topic and date as the clearest area needing work, and briefly say why. Frame constructively, not harshly."
+  },
+  "bestPoint": "1-2 sentences on the single most consistent strength shown across their practice history — their standout quality.",
+  "mostNeededImprovement": "1-2 sentences on the single most important thing to focus on next — the one change that would help the most.",
   "recurringThemes": ["2-4 specific patterns noticed repeatedly across multiple sessions' feedback, phrased constructively"],
-  "actionPlan": ["3-4 concrete, specific next steps tailored to what was found, phrased encouragingly"]
-}`;
+  "actionPlan": ["3-4 concrete, specific next steps tailored to what was found, phrased encouragingly"],
+  "videoDeliveryTrend": ${anyVideoSessions ? '"2-3 sentences on patterns across their Video Delivery Notes where video was used — posture, eye contact, expression trends across sessions."' : "null"}
+}
 
-        const parsed = await callClaude(prompt, 1200, "claude-sonnet-4-6");
+${anyVideoSessions ? "" : "Note: no sessions in this history used video, so videoDeliveryTrend must be null — do not invent video observations that weren't provided."}`;
+
+        const parsed = await callClaude(prompt, 1600, "claude-sonnet-4-6");
 
         const saved = await supabaseFetch(`/rest/v1/scooby_coach_analyses`, {
             method: "POST",
@@ -2141,7 +2181,12 @@ Return ONLY this exact JSON structure, no markdown, no preamble:
                 sessions_analyzed: recentSessions.length,
                 trend_analysis: parsed.trendAnalysis || null,
                 recurring_themes: parsed.recurringThemes || null,
-                action_plan: parsed.actionPlan || null
+                action_plan: parsed.actionPlan || null,
+                best_point: parsed.bestPoint || null,
+                most_needed_improvement: parsed.mostNeededImprovement || null,
+                category_trends: parsed.categoryTrends || null,
+                session_callouts: parsed.sessionCallouts || null,
+                video_delivery_trend: parsed.videoDeliveryTrend || null
             })
         });
 
