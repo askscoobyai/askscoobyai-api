@@ -2224,7 +2224,7 @@ Return ONLY this exact JSON structure, no markdown, no preamble:
                 most_needed_improvement: parsed.mostNeededImprovement || null,
                 category_trends: parsed.categoryTrends || null,
                 session_callouts: parsed.sessionCallouts || null,
-                video_delivery_trend: parsed.videoDeliveryTrend || null
+                video_delivery_trend: anyVideoSessions ? (parsed.videoDeliveryTrend || null) : null
             })
         });
 
