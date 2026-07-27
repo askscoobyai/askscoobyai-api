@@ -1183,6 +1183,20 @@ ${trimmedJD}
     }
 });
 
+// ── Lightweight passive logging for client-side diagnostic events (e.g.
+// unexpected speech-recognition stops during practice). No database table —
+// just lands in server logs, so real evidence accumulates automatically
+// instead of relying on someone manually catching and reporting it live.
+app.post("/client-diagnostics", requireApiToken, async (req, res) => {
+    try {
+        const { event, detail, userAgent } = req.body || {};
+        console.warn(`CLIENT DIAGNOSTIC — ${cleanText(event).slice(0, 100)} — ${cleanText(detail).slice(0, 300)} — UA: ${cleanText(userAgent).slice(0, 200)}`);
+    } catch (err) {
+        // Never let a logging failure surface to the user
+    }
+    res.json({ success: true });
+});
+
 app.post("/generate-question-audio", async (req, res) => {
     try {
         const question =
