@@ -2135,7 +2135,7 @@ app.post("/scooby-coach/generate", requireApiToken, verifyGoogleUser, async (req
             // baseline at all — rather than fall back to the same buggy
             // capped comparison, conservatively require a full 5 fresh
             // sessions starting now.
-            const previousTrueTotal = lastAnalysis.total_sessions_at_generation ?? allSessions.length;
+            const previousTrueTotal = lastAnalysis.total_sessions_at_generation ?? lastAnalysis.sessions_analyzed ?? 0;
             const newSessionsSinceLast = allSessions.length - previousTrueTotal;
             if (newSessionsSinceLast < SCOOBY_COACH_MIN_SESSIONS) {
                 return res.status(400).json({
@@ -2161,6 +2161,17 @@ app.post("/scooby-coach/generate", requireApiToken, verifyGoogleUser, async (req
         // Cap to the most recent 20 sessions to keep the prompt bounded for
         // very frequent practicers, while still covering plenty of history.
         const recentSessions = allSessions.slice(-20);
+        // Coach score = average performance across the sessions this review covers.
+        // Sessions already carry per-category numeric scores, so this is deterministic
+        // (no model involvement) and matches how the session charts are scored.
+        const coachAvg = key => {
+            const nums = recentSessions.map(s => s[key]).filter(v => typeof v === "number");
+            return nums.length ? Math.round((nums.reduce((a, b) => a + b, 0) / nums.length) * 10) / 10 : null;
+        };
+        const coachOverallScore = coachAvg("overall_score");
+        const coachStructureScore = coachAvg("structure_score");
+        const coachTechnicalDepthScore = coachAvg("technical_depth_score");
+        const coachDeliveryScore = coachAvg("delivery_score");
         const anyVideoSessions = recentSessions.some(s => s.delivery_notes);
 
         const sessionSummaries = recentSessions.map((s, i) => {
@@ -2217,6 +2228,10 @@ Return ONLY this exact JSON structure, no markdown, no preamble:
                 user_id: userId,
                 sessions_analyzed: recentSessions.length,
                 total_sessions_at_generation: allSessions.length,
+                coach_overall_score: coachOverallScore,
+                coach_structure_score: coachStructureScore,
+                coach_technical_depth_score: coachTechnicalDepthScore,
+                coach_delivery_score: coachDeliveryScore,
                 trend_analysis: parsed.trendAnalysis || null,
                 recurring_themes: parsed.recurringThemes || null,
                 action_plan: parsed.actionPlan || null,
