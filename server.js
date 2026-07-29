@@ -846,7 +846,7 @@ Use this exact JSON structure:
 }
 
 Rules:
-- Extract the jobTitle from the job description.
+- Extract the jobTitle from the job description. If the job title is not clearly stated in the job description, return an empty string for jobTitle rather than guessing (do not use a location, department, or seniority word as the title).
 - companyName must be the exact company value provided, or an empty string if not provided.
 - Generate exactly ${targetInterviewQuestionCount} interviewQuestions.
 - Questions must follow this order:
@@ -1007,7 +1007,7 @@ Use this exact JSON structure:
 }
 
 Rules:
-- Extract the jobTitle from the job description.
+- Extract the jobTitle from the job description. If the job title is not clearly stated in the job description, return an empty string for jobTitle rather than guessing (do not use a location, department, or seniority word as the title).
 - Generate exactly 5 STAR answers.
 - Each STAR answer should be realistic and interview-ready.
 - Do not invent employers, dates, qualifications, certifications, figures, achievements, tools, systems, or metrics.
@@ -1136,7 +1136,7 @@ Use this exact JSON structure:
 }
 
 Rules:
-- Extract the jobTitle from the job description.
+- Extract the jobTitle from the job description. If the job title is not clearly stated in the job description, return an empty string for jobTitle rather than guessing (do not use a location, department, or seniority word as the title).
 - Generate one concise tailored cover letter around 120-160 words.
 - Generate exactly 5 cvImprovementPreview bullet points.
 - Do not invent employers, dates, qualifications, certifications, figures, or achievements.
