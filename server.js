@@ -1361,7 +1361,7 @@ app.post("/generate-practice-feedback", async (req, res) => {
         // than as separate count/decide/charge steps, which previously left
         // a small window where near-simultaneous requests could both read
         // "still free" before either had recorded its own count.
-        const FREE_PRACTICE_TOTAL = 20;
+        const FREE_PRACTICE_TOTAL = 10;
         const SESSIONS_PER_CREDIT = 5;
         const jobFingerprint = getJobFingerprint(trimmedJD, safeCompany);
         let creditCharged = false;
@@ -2020,7 +2020,7 @@ app.get("/terms", (req, res) => {
 
         <h2>6. Credits and Payments</h2>
         <ul>
-            <li>Credits are consumed when you use certain features: Interview Q&amp;A, STAR Answers, Cover Letter &amp; CV generation, and Scooby Coach analysis all cost 1 credit. AI Mock Interview practice feedback is free for your first 20 sessions (across your whole account); after that, 1 credit unlocks each next block of 5 practice sessions — this applies whether or not video or voice features are used during those sessions.</li>
+            <li>Credits are consumed when you use certain features: Interview Q&amp;A, STAR Answers, Cover Letter &amp; CV generation, and Scooby Coach analysis all cost 1 credit. AI Mock Interview practice feedback is free for your first 10 sessions (across your whole account); after that, 1 credit unlocks each next block of 5 practice sessions — this applies whether or not video or voice features are used during those sessions.</li>
             <li>Credits are non-refundable except where required by applicable consumer protection law.</li>
             <li>Payments are processed by Stripe. We do not store your payment card details.</li>
         </ul>
@@ -2045,7 +2045,7 @@ const SCOOBY_COACH_MIN_SESSIONS = 5;
 // if one exists. Viewing/revisiting never costs a credit.
 app.post("/practice-sessions/free-remaining", requireApiToken, verifyGoogleUser, async (req, res) => {
     try {
-        const FREE_PRACTICE_TOTAL = 20;
+        const FREE_PRACTICE_TOTAL = 10;
         const SESSIONS_PER_CREDIT = 5;
         const users = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(req.googleUser.email)}&select=id,practice_session_count`);
         if (!users || users.length === 0) {
