@@ -1422,7 +1422,7 @@ Use this exact JSON structure:
   "verbalWrapUp": "string"
 }
 
-- verbalWrapUp: a SHORT, warm, spoken-style wrap-up meant to be read aloud — one sentence, max ~20 words. Should feel like a friendly interviewer briefly commenting after your answer (e.g. "Nice work — your structure was strong, just watch your pacing next time."), not a repeat of the full summary. Pick the single most useful takeaway, not everything.
+- verbalWrapUp: a SHORT, warm, spoken-style wrap-up read aloud — one sentence, max ~20 words, like a friendly interviewer’s quick reaction, not a repeat of the summary. Pick ONE genuinely useful takeaway specific to THIS answer, and VARY it every single time: sometimes pure praise with no criticism, sometimes a structure or conciseness note, sometimes a specific content or example point, sometimes something they did unusually well. Do NOT default to pacing, “slowing down”, or “technical terms” unless that was genuinely the standout issue for THIS particular answer. Never reuse a stock closing phrase. Draw on the full range (do not copy these verbatim): “Really solid — that example brought the answer to life.” / “Strong stuff — tightening the middle would make it even punchier.” / “Great instincts — leading with the result next time would land it faster.” / “Nicely done — you clearly know this area well.”
 
 Context:
 - Practice type: ${safeContextType || "interview"}
