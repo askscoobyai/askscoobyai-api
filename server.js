@@ -856,7 +856,7 @@ Rules:
 - Questions must follow this order:
   1: warm self-introduction question.
   2-4: CV-specific technical or experience-based questions. The word "CV" must appear in each question.
-  5-8: genuinely technical or system-specific questions based on the job description.
+  5-8: practical, role-specific questions based on the job description — the hands-on skills, methods, tools, equipment, or real situations that matter for THIS particular role (whatever they are for the job in question).
   9-11: behavioural, stakeholder, communication, prioritisation, or role-fit questions.
   12: company motivation/culture question only if company is provided.
 - Question 1 should use a natural variant of: "Thanks for joining us today. Could you start by telling me a little about yourself and your background?"
@@ -867,9 +867,9 @@ Rules:
 - Only question 12 may be company-related.
 
 Technical question rules:
-- Questions 5-8 must be practical and technical/system-specific.
+- Questions 5-8 must be practical and specific to how THIS job is actually done day-to-day.
 - They must not be behavioural questions.
-- They should test tools, systems, methods, workflows, troubleshooting, checks, data, platforms, software, compliance processes, reporting processes, or operational systems from the job description.
+- They should test the real skills, tools, equipment, methods, procedures, checks, or situations relevant to THIS role — whatever they actually are. Adapt to the job: e.g. service standards, drink/food prep and handling a rush for hospitality; safety, tools and installation steps for a trade; patient care and procedures for healthcare; or systems, data and reporting checks for office/analytical roles. Never force office/technical/"systems" framing onto a role where it does not fit.
 - Do not invent tools, systems, employers, dates, certifications, figures, or achievements.
 
 Answer rules:
@@ -877,7 +877,7 @@ Answer rules:
 - Each answer must be written in the first person.
 - Question 1 (self-introduction) must be 60-70 words maximum. It should be punchy, confident and naturally conversational — not a CV recitation.
 - For CV-specific questions, answer using CV evidence where possible. Reference specific employers, tools, and outcomes from the CV.
-- For questions 5-8, give concrete steps, checks, methods, trade-offs, or troubleshooting logic. Where the CV mentions specific tools (e.g. Databricks, Snowflake, Power BI, Alteryx), reference them directly in the answer rather than giving a generic response.
+- For questions 5-8, give concrete steps, methods, checks, or trade-offs appropriate to the role. Where the CV mentions specific tools, equipment, systems, or methods (whatever they are for this job), reference them directly in the answer rather than giving a generic response.
 - For behavioural questions, use a practical workplace example grounded in the CV. Name the employer and context where possible.
 - Where the CV includes quantified results (percentages, time savings, scale), use them. Where it does not, express results in relative terms (e.g. "reduced from monthly to weekly", "cut development time by approximately a third").
 - Every answer must end with one short, natural closing line.
@@ -901,7 +901,7 @@ Job Description:
 ${trimmedJD}
 `;
 
-        const parsed = await callClaude(prompt, 3200);
+        const parsed = await callClaude(prompt, 3200, "claude-sonnet-4-6");
 
         parsed.companyName = providedCompany;
 
@@ -1056,7 +1056,7 @@ Job Description:
 ${trimmedJD}
 `;
 
-        const parsed = await callClaude(prompt, 3500);
+        const parsed = await callClaude(prompt, 3500, "claude-sonnet-4-6");
 
         parsed.companyName = providedCompany;
         parsed.companyInfo = hasCompany ? (parsed.companyInfo || "") : "";
