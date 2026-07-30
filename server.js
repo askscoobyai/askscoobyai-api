@@ -1439,6 +1439,8 @@ ${safeExpectedAnswer}
 Candidate spoken answer transcript:
 ${safeTranscript}
 
+IMPORTANT — about this transcript: it was produced by automatic browser speech recognition, which frequently mishears or garbles technical terms, product names, acronyms, tools and jargon (a word like “Kubernetes”, “Databricks” or “OAuth” can come through wrong or broken). Treat any such oddities as TRANSCRIPTION errors, NOT the candidate’s mistakes. Do NOT tell the candidate to work on, slow down on, enunciate, or “nail” their technical terms based on how those words appear here — assume they pronounced them correctly. Only raise technical terminology if the underlying CONTENT is genuinely wrong or missing, never because a term looks misspelt or awkward in the transcript.
+
 CV:
 ${trimmedCV}
 
