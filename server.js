@@ -488,7 +488,11 @@ async function callClaude(prompt, maxTokens = 2500, model = "claude-haiku-4-5-20
 
     const text = response.content[0].text.trim();
     // Strip markdown code fences if present
-    const cleaned = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim();
+    let cleaned = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim();
+    const jStart = cleaned.search(/[{[]/);
+    if (jStart > 0) cleaned = cleaned.slice(jStart);
+    const jEnd = Math.max(cleaned.lastIndexOf("}"), cleaned.lastIndexOf("]"));
+    if (jEnd > -1) cleaned = cleaned.slice(0, jEnd + 1);
     return JSON.parse(cleaned);
 }
 
@@ -2098,6 +2102,7 @@ app.post("/scooby-coach/status", requireApiToken, verifyGoogleUser, async (req, 
 
 // Costs 1 credit — generates a fresh cross-session analysis.
 app.post("/scooby-coach/generate", requireApiToken, verifyGoogleUser, async (req, res) => {
+    let creditSpent = false;
     try {
         const users = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(req.googleUser.email)}&select=id`);
         if (!users || users.length === 0) {
@@ -2157,6 +2162,8 @@ app.post("/scooby-coach/generate", requireApiToken, verifyGoogleUser, async (req
                 noCredits: true
             });
         }
+
+        creditSpent = true;
 
         // Cap to the most recent 20 sessions to keep the prompt bounded for
         // very frequent practicers, while still covering plenty of history.
@@ -2220,7 +2227,7 @@ Return ONLY this exact JSON structure, no markdown, no preamble:
 
 - videoDeliveryTrend: ${anyVideoSessions ? "2-3 sentences on patterns across their Video Delivery Notes — posture, eye contact, expression trends across sessions." : "no sessions in this history used video, so this MUST be the literal JSON value null, not a string — do not invent video observations that weren't provided."}`;
 
-        const parsed = await callClaude(prompt, 1600, "claude-sonnet-4-6");
+        const parsed = await callClaude(prompt, 3000, "claude-sonnet-4-6");
 
         const saved = await supabaseFetch(`/rest/v1/scooby_coach_analyses`, {
             method: "POST",
@@ -2252,6 +2259,19 @@ Return ONLY this exact JSON structure, no markdown, no preamble:
         });
     } catch (err) {
         console.error("scooby-coach generate error:", err);
+        if (creditSpent) {
+            try {
+                await supabaseRpc("add_credits", {
+                    p_email: req.googleUser.email,
+                    p_amount: 1,
+                    p_type: "coach_refund",
+                    p_stripe_session_id: "refund_coach_" + Date.now()
+                });
+                console.log("scooby-coach: refunded 1 credit after failed generation");
+            } catch (refundErr) {
+                console.error("scooby-coach: REFUND FAILED after failed generation:", refundErr);
+            }
+        }
         res.status(500).json({ error: "Could not generate Scooby Coach analysis." });
     }
 });
