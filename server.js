@@ -1563,7 +1563,7 @@ Feedback rules:
         // below, so deliveryNotes makes it into what gets persisted.
         if (Array.isArray(videoFrames) && videoFrames.length > 0) {
             try {
-                parsed.deliveryNotes = await analyzeVideoDelivery(videoFrames, safeTranscript, { email: req.googleUser.email, feature: "video_delivery" });
+                parsed.deliveryNotes = await analyzeVideoDelivery(videoFrames, safeTranscript, { email: req.googleUser.email, feature: "video_delivery_" + (safeContextType || "interview") });
             } catch (visionErr) {
                 console.error("practice-feedback: video delivery analysis failed (non-fatal):", visionErr);
             }
