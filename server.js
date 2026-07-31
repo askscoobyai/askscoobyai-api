@@ -473,7 +473,36 @@ function validatePracticeBody(req) {
 
 // claude-haiku-4-5 — fast, for interview Q&A and STAR answers
 // claude-sonnet-4-6 — quality, for cover letter and practice feedback
-async function callClaude(prompt, maxTokens = 2500, model = "claude-haiku-4-5-20251001") {
+// ── Per-user Claude usage / cost logging ──
+// Approx USD per 1,000,000 tokens. VERIFY against current Anthropic pricing and update as needed.
+const MODEL_RATES = {
+    "claude-haiku-4-5-20251001": { in: 1.0, out: 5.0 },
+    "claude-sonnet-4-6": { in: 3.0, out: 15.0 }
+};
+function logClaudeUsage(logMeta, model, usage) {
+    try {
+        const rate = MODEL_RATES[model] || { in: 0, out: 0 };
+        const inTok = usage.input_tokens || 0;
+        const outTok = usage.output_tokens || 0;
+        const cost = (inTok / 1e6) * rate.in + (outTok / 1e6) * rate.out;
+        supabaseFetch("/rest/v1/usage_log", {
+            method: "POST",
+            headers: { "Prefer": "return=minimal" },
+            body: JSON.stringify({
+                email: logMeta.email || null,
+                feature: logMeta.feature || null,
+                model: model,
+                input_tokens: inTok,
+                output_tokens: outTok,
+                cost_usd: Math.round(cost * 1e6) / 1e6
+            })
+        }).catch(function (err) { console.error("usage_log insert failed:", err && err.message); });
+    } catch (e) {
+        console.error("logClaudeUsage error:", e && e.message);
+    }
+}
+
+async function callClaude(prompt, maxTokens = 2500, model = "claude-haiku-4-5-20251001", logMeta = null) {
     const response = await anthropic.messages.create({
         model: model,
         max_tokens: maxTokens,
@@ -485,6 +514,8 @@ async function callClaude(prompt, maxTokens = 2500, model = "claude-haiku-4-5-20
             }
         ]
     });
+
+    if (logMeta && response && response.usage) logClaudeUsage(logMeta, model, response.usage);
 
     const text = response.content[0].text.trim();
     // Strip markdown code fences if present
@@ -901,7 +932,7 @@ Job Description:
 ${trimmedJD}
 `;
 
-        const parsed = await callClaude(prompt, 3200, "claude-sonnet-4-6");
+        const parsed = await callClaude(prompt, 3200, "claude-sonnet-4-6", { email: req.googleUser.email, feature: "interview_qa" });
 
         parsed.companyName = providedCompany;
 
@@ -1056,7 +1087,7 @@ Job Description:
 ${trimmedJD}
 `;
 
-        const parsed = await callClaude(prompt, 3500, "claude-sonnet-4-6");
+        const parsed = await callClaude(prompt, 3500, "claude-sonnet-4-6", { email: req.googleUser.email, feature: "star" });
 
         parsed.companyName = providedCompany;
         parsed.companyInfo = hasCompany ? (parsed.companyInfo || "") : "";
@@ -1163,7 +1194,7 @@ Job Description:
 ${trimmedJD}
 `;
 
-        const parsed = await callClaude(prompt, 2400, "claude-sonnet-4-6");
+        const parsed = await callClaude(prompt, 2400, "claude-sonnet-4-6", { email: req.googleUser.email, feature: "cover_cv" });
 
         parsed.companyName = providedCompany;
         parsed.cvImprovementPreview = Array.isArray(parsed.cvImprovementPreview)
@@ -1507,7 +1538,7 @@ Feedback rules:
 - If more detail would genuinely help, phrase it gently as optional: "In a real interview, you could add one short example if you have one available."
 `;
 
-        const parsed = await callClaude(prompt, 2200, "claude-sonnet-4-6");
+        const parsed = await callClaude(prompt, 2200, "claude-sonnet-4-6", { email: req.googleUser.email, feature: "practice_feedback" });
 
         parsed.overallScore = Number(parsed.overallScore) || 0;
         parsed.structureScore = Math.max(1, Math.min(10, Number(parsed.structureScore) || parsed.overallScore));
@@ -2229,7 +2260,7 @@ Return ONLY this exact JSON structure, no markdown, no preamble:
 
 - videoDeliveryTrend: ${anyVideoSessions ? "2-3 sentences on patterns across their Video Delivery Notes — posture, eye contact, expression trends across sessions." : "no sessions in this history used video, so this MUST be the literal JSON value null, not a string — do not invent video observations that weren't provided."}`;
 
-        const parsed = await callClaude(prompt, 3000, "claude-sonnet-4-6");
+        const parsed = await callClaude(prompt, 3000, "claude-sonnet-4-6", { email: req.googleUser.email, feature: "coach" });
 
         const saved = await supabaseFetch(`/rest/v1/scooby_coach_analyses`, {
             method: "POST",
