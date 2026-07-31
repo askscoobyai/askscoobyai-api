@@ -532,7 +532,7 @@ async function callClaude(prompt, maxTokens = 2500, model = "claude-haiku-4-5-20
 // isolated: this can fail independently without ever affecting the main
 // text-based feedback, since visual delivery assessment from sparse frames
 // is a much less proven capability than the established scoring above.
-async function analyzeVideoDelivery(videoFrames, transcript) {
+async function analyzeVideoDelivery(videoFrames, transcript, logMeta = null) {
     const content = [
         {
             type: "text",
@@ -583,6 +583,8 @@ Rules:
         temperature: 0.7,
         messages: [{ role: "user", content }]
     });
+
+    if (logMeta && response && response.usage) logClaudeUsage(logMeta, "claude-haiku-4-5-20251001", response.usage);
 
     const text = response.content[0].text.trim();
     const cleaned = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim();
@@ -1538,7 +1540,7 @@ Feedback rules:
 - If more detail would genuinely help, phrase it gently as optional: "In a real interview, you could add one short example if you have one available."
 `;
 
-        const parsed = await callClaude(prompt, 2200, "claude-sonnet-4-6", { email: req.googleUser.email, feature: "practice_feedback" });
+        const parsed = await callClaude(prompt, 2200, "claude-sonnet-4-6", { email: req.googleUser.email, feature: "practice_" + (safeContextType || "interview") });
 
         parsed.overallScore = Number(parsed.overallScore) || 0;
         parsed.structureScore = Math.max(1, Math.min(10, Number(parsed.structureScore) || parsed.overallScore));
@@ -1561,7 +1563,7 @@ Feedback rules:
         // below, so deliveryNotes makes it into what gets persisted.
         if (Array.isArray(videoFrames) && videoFrames.length > 0) {
             try {
-                parsed.deliveryNotes = await analyzeVideoDelivery(videoFrames, safeTranscript);
+                parsed.deliveryNotes = await analyzeVideoDelivery(videoFrames, safeTranscript, { email: req.googleUser.email, feature: "video_delivery" });
             } catch (visionErr) {
                 console.error("practice-feedback: video delivery analysis failed (non-fatal):", visionErr);
             }
