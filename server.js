@@ -473,6 +473,23 @@ function validatePracticeBody(req) {
 
 // claude-haiku-4-5 — fast, for interview Q&A and STAR answers
 // claude-sonnet-4-6 — quality, for cover letter and practice feedback
+// ── ElevenLabs balance guard ── cached (5 min) so it is not an API call per request.
+let _elevenRemaining = null;
+let _elevenCheckedAt = 0;
+async function getElevenRemainingCredits() {
+    if (_elevenRemaining !== null && Date.now() - _elevenCheckedAt < 5 * 60 * 1000) return _elevenRemaining;
+    try {
+        const r = await fetch("https://api.elevenlabs.io/v1/user/subscription", {
+            headers: { "xi-api-key": process.env.ELEVENLABS_API_KEY }
+        });
+        if (!r.ok) return null;
+        const j = await r.json();
+        _elevenRemaining = (j.character_limit || 0) - (j.character_count || 0);
+        _elevenCheckedAt = Date.now();
+        return _elevenRemaining;
+    } catch (e) { return null; }
+}
+
 // ── Per-user Claude usage / cost logging ──
 // Approx USD per 1,000,000 tokens. VERIFY against current Anthropic pricing and update as needed.
 const MODEL_RATES = {
@@ -1258,7 +1275,7 @@ app.post("/generate-question-audio", async (req, res) => {
         // cost/quota exposure from someone spamming Start Interview without
         // ever recording. Hitting this cap fails into the extension's
         // existing browser-voice fallback rather than showing an error.
-        const TTS_DAILY_LIMIT = 50;
+        const TTS_DAILY_LIMIT = parseInt(process.env.TTS_DAILY_LIMIT, 10) || 50;
         // ── Daily cap, GLOBAL across all users ── protects the shared
         // monthly ElevenLabs budget itself. The per-user cap alone doesn't
         // stop combined usage across many users from outpacing what the
@@ -1266,7 +1283,7 @@ app.post("/generate-question-audio", async (req, res) => {
         // the sustainable daily average, so normal busier days aren't
         // affected, but no single day can burn an outsized chunk of the
         // month's shared pool.
-        const TTS_GLOBAL_DAILY_LIMIT = 100;
+        const TTS_GLOBAL_DAILY_LIMIT = parseInt(process.env.TTS_GLOBAL_DAILY_LIMIT, 10) || 300;
         let ttsRemainingToday = null;
         try {
             const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
@@ -1291,6 +1308,14 @@ app.post("/generate-question-audio", async (req, res) => {
             }
         } catch (capErr) {
             console.error("tts daily cap check failed (allowing request through):", capErr);
+        }
+
+        // Real budget guard: use the browser voice once ElevenLabs credits are genuinely low,
+        // instead of relying only on a daily call count that ignores the actual balance.
+        const ELEVEN_MIN_CREDITS = parseInt(process.env.ELEVEN_MIN_CREDITS, 10) || 500;
+        const elevenRemaining = await getElevenRemainingCredits();
+        if (elevenRemaining !== null && elevenRemaining < ELEVEN_MIN_CREDITS) {
+            return res.status(429).json({ error: "Voice credits low — using browser voice." });
         }
 
         const voiceId = process.env.ELEVENLABS_VOICE_ID;
@@ -1472,7 +1497,7 @@ ${safeExpectedAnswer}
 Candidate spoken answer transcript:
 ${safeTranscript}
 
-IMPORTANT — about this transcript: it was produced by automatic browser speech recognition, which frequently mishears or garbles technical terms, product names, acronyms, tools and jargon (a word like “Kubernetes”, “Databricks” or “OAuth” can come through wrong or broken). Treat any such oddities as TRANSCRIPTION errors, NOT the candidate’s mistakes. Do NOT tell the candidate to work on, slow down on, enunciate, or “nail” their technical terms based on how those words appear here — assume they pronounced them correctly. Only raise technical terminology if the underlying CONTENT is genuinely wrong or missing, never because a term looks misspelt or awkward in the transcript.
+IMPORTANT — about this transcript: it was produced by automatic browser speech recognition, which frequently mishears or garbles technical terms, product names, acronyms, tools and jargon (a word like “Kubernetes”, “Databricks” or “OAuth” can come through wrong or broken). Treat any such oddities as TRANSCRIPTION errors, NOT the candidate’s mistakes. Do NOT tell the candidate to work on, slow down on, enunciate, or “nail” their technical terms based on how those words appear here — assume they pronounced them correctly. Only raise technical terminology if the underlying CONTENT is genuinely wrong or missing, never because a term looks misspelt or awkward in the transcript. (This protection is about individual mis-heard TERMS, not overall coherence: if the transcript AS A WHOLE is broadly fragmented, disjointed, or genuinely hard to follow — not just an odd word here and there — that can legitimately reflect rushed or unclear delivery, and it is fair to reflect that in the delivery score and to gently suggest speaking more clearly.)
 
 CV:
 ${trimmedCV}
@@ -1493,10 +1518,14 @@ Feedback philosophy:
 Scoring rules:
 - Score from 1 to 10.
 - Provide overallScore plus three separate category scores: structureScore, technicalDepthScore, deliveryScore — each scored independently from 1 to 10 using the same encouraging philosophy below, not just copies of overallScore.
-- If the transcript is very similar to the reference answer and is understandable, the score should usually be 8 to 10.
-- If it closely matches the reference but sounds slightly stiff, repetitive, or overlong, score 8 or 9 and give delivery tips.
-- If it is incomplete, off-topic, very short, unclear, or missing major points, score lower.
-- Be encouraging but honest.
+- USE THE FULL 1-10 RANGE — do not cluster scores at 7-9. A number must mean something, or the progress-tracking feature is worthless.
+- Reserve 9-10 for genuinely excellent answers: complete, well-structured, AND delivered fluently, naturally, and confidently, with nothing meaningful left to fix.
+- 7-8 = a good answer with clear room to improve — solid content but stiff, rushed, rambling, hesitant, or slightly incomplete.
+- 5-6 = adequate but flat, mechanical, or partial: it does the job without standing out. A plainly recited reference answer with no real spark belongs HERE, not automatically high.
+- 3-4 = weak: incomplete, meandering, unclear, or missing important points.
+- 1-2 = off-topic, barely an answer, or almost nothing usable.
+- Matching the reference answer is the BASELINE, not excellence: reciting the words earns a middling score, and it is delivery quality (fluency, confidence, conciseness, sounding natural rather than read aloud) that lifts a 6 toward a 9. Do not hand out 8-10 just because the words match.
+- Be warm and encouraging in TONE, but honest and discriminating with the NUMBER.
 
 Feedback rules:
 - strengths must contain exactly 3 bullet points.
