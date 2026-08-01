@@ -683,6 +683,13 @@ function buildFallbackCompanyCultureQuestion(companyName) {
     };
 }
 
+function buildFallbackRoleMotivationQuestion() {
+    return {
+        question: `What draws you to this role, and what are you hoping to get out of it?`,
+        answer: `What draws me to this role is that it lines up closely with the experience and skills I most enjoy using, and the responsibilities in the job description are exactly the kind of work I want to keep building on. I am looking for a position where I can apply what I have done well before, take on new challenges, and keep developing. Beyond that, I want to make a genuine contribution to the team and grow into the role over time. That combination is what makes this opportunity feel like the right next step for me.`
+    };
+}
+
 function isCompanyQuestion(item, companyName) {
     const question = cleanText(item?.question || "").toLowerCase();
     const company = cleanText(companyName).toLowerCase();
@@ -707,7 +714,7 @@ function isQuestionObject(item) {
 }
 
 function ensureInterviewQuestionStructure(parsed, hasCompany, companyName) {
-    const targetCount = hasCompany ? 12 : 11;
+    const targetCount = 12;
     const originalQuestions = Array.isArray(parsed.interviewQuestions)
         ? parsed.interviewQuestions.filter(isQuestionObject)
         : [];
@@ -733,6 +740,8 @@ function ensureInterviewQuestionStructure(parsed, hasCompany, companyName) {
 
     if (hasCompany) {
         finalQuestions[11] = companyQuestions[0] || buildFallbackCompanyCultureQuestion(companyName);
+    } else {
+        finalQuestions[11] = nonCompanyQuestions[11] || buildFallbackRoleMotivationQuestion();
     }
 
     parsed.interviewQuestions = finalQuestions.slice(0, targetCount);
@@ -839,7 +848,7 @@ app.post("/generate-interview", async (req, res) => {
         const { trimmedCV, trimmedJD } = trimInputs(cv, jd);
         const providedCompany = getCompany(company);
         const hasCompany = providedCompany.length > 1;
-        const targetInterviewQuestionCount = hasCompany ? 12 : 11;
+        const targetInterviewQuestionCount = 12;
 
         // ── Atomic credit charge — 1 credit unlocks all 3 sections for this
         // exact job. Charged once here; the other two routes see the same
@@ -876,9 +885,8 @@ Company culture question rule:
 `
             : `
 Company culture question rule:
-- Do not generate a company culture or company motivation question.
-- Do not ask "Why do you want to work here?"
-- Because no company name was provided, generate exactly 11 interviewQuestions only.
+- No company name was provided, so do NOT ask "Why do you want to work here?" or reference any specific company by name.
+- Generate question 12 as a ROLE-MOTIVATION question instead: what draws the candidate to this role or this type of work, what they hope to get from it, or why it is a strong next step. Keep it general to the role, not tied to a named company.
 `;
 
         const prompt = `
