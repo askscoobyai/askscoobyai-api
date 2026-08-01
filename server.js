@@ -1192,12 +1192,13 @@ Use this exact JSON structure:
 Rules:
 - Extract the jobTitle from the job description. If the job title is not clearly stated in the job description, return an empty string for jobTitle rather than guessing (do not use a location, department, or seniority word as the title).
 - Generate one concise tailored cover letter around 120-160 words.
-- Generate exactly 5 cvImprovementPreview bullet points.
+- Generate 7 to 8 cvImprovementPreview bullet points.
 - Do not invent employers, dates, qualifications, certifications, figures, or achievements.
 - If company is provided, use it naturally.
 - If company is not provided, write without naming a company.
 - CV improvement points must be specific, actionable, and connected to job requirements.
 - Where possible, include an example rewritten bullet.
+- Include at least 2-3 of these as READY-TO-ADD new bullet points: complete, role-tailored CV bullets (strong action verb, and a quantified result wherever the CV genuinely supports one) that the candidate could paste straight into their CV — not just advice about what to change. Put the ready-to-add bullet text in single quotes.
 - When referencing employers from the CV in the cover letter, always use the full employer name with correct prefix — e.g. "At E.On Energy" not "On Energy", "At Adidas" not "Adidas". Never drop the "At" prefix when starting a sentence with an employer name.
 - Where a rewritten CV bullet is suggested, put the suggested text inside single quotes so it can be visually highlighted for the user.
 
@@ -1217,7 +1218,7 @@ ${trimmedJD}
 
         parsed.companyName = providedCompany;
         parsed.cvImprovementPreview = Array.isArray(parsed.cvImprovementPreview)
-            ? parsed.cvImprovementPreview.slice(0, 5)
+            ? parsed.cvImprovementPreview.slice(0, 8)
             : [];
 
         if (validation.weak) {
