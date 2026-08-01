@@ -1480,7 +1480,7 @@ Use this exact JSON structure:
   "verbalWrapUp": "string"
 }
 
-- verbalWrapUp: a SHORT, warm, spoken-style wrap-up read aloud — one sentence, max ~20 words, like a friendly interviewer’s quick reaction, not a repeat of the summary. Pick ONE genuinely useful takeaway specific to THIS answer, and VARY it every single time: sometimes pure praise with no criticism, sometimes a structure or conciseness note, sometimes a specific content or example point, sometimes something they did unusually well. Do NOT default to pacing, “slowing down”, or “technical terms” unless that was genuinely the standout issue for THIS particular answer. Never reuse a stock closing phrase. Draw on the full range (do not copy these verbatim): “Really solid — that example brought the answer to life.” / “Strong stuff — tightening the middle would make it even punchier.” / “Great instincts — leading with the result next time would land it faster.” / “Nicely done — you clearly know this area well.”
+- verbalWrapUp: a SHORT, warm, spoken-style wrap-up read aloud — one sentence, max ~20 words, like a friendly interviewer’s quick reaction, not a repeat of the summary. Pick ONE genuinely useful takeaway specific to THIS answer, and VARY it every single time: sometimes pure praise with no criticism, sometimes a structure or conciseness note, sometimes a specific content or example point, sometimes something they did unusually well. Do NOT default to pacing, “slowing down”, or “technical terms” unless that was genuinely the standout issue for THIS particular answer. Never reuse a stock closing phrase. If the answer was clearly cut off or unfinished, do NOT offer a polish tip; instead gently note it seemed cut short and encourage finishing the thought next time. Draw on the full range (do not copy these verbatim): “Really solid — that example brought the answer to life.” / “Strong stuff — tightening the middle would make it even punchier.” / “Great instincts — leading with the result next time would land it faster.” / “Nicely done — you clearly know this area well.”
 
 Context:
 - Practice type: ${safeContextType || "interview"}
@@ -1526,6 +1526,7 @@ Scoring rules:
 - 1-2 = off-topic, barely an answer, or almost nothing usable.
 - Matching the reference answer is the BASELINE, not excellence: reciting the words earns a middling score, and it is delivery quality (fluency, confidence, conciseness, sounding natural rather than read aloud) that lifts a 6 toward a 9. Do not hand out 8-10 just because the words match.
 - Be warm and encouraging in TONE, but honest and discriminating with the NUMBER.
+- INCOMPLETE / CUT-OFF ANSWERS: if the transcript stops abruptly, trails off mid-sentence, or is clearly unfinished (the candidate stopped partway through), do NOT give polish, "seal it", or advanced-tip feedback as if the answer were complete — that reads as tone-deaf. Instead, warmly acknowledge the answer looks cut short, make the main takeaway about finishing the thought / completing the answer next time, and score it as incomplete. Only give refinement tips when the answer actually reached a natural conclusion.
 
 Feedback rules:
 - strengths must contain exactly 3 bullet points.
