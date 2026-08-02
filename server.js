@@ -482,10 +482,11 @@ async function getElevenRemainingCredits() {
         const r = await fetch("https://api.elevenlabs.io/v1/user/subscription", {
             headers: { "xi-api-key": process.env.ELEVENLABS_API_KEY }
         });
-        if (!r.ok) return null;
+        if (!r.ok) { console.warn("[TTS] ElevenLabs subscription HTTP not ok:", r.status); return null; }
         const j = await r.json();
         _elevenRemaining = (j.character_limit || 0) - (j.character_count || 0);
         _elevenCheckedAt = Date.now();
+        console.log("[TTS] ElevenLabs balance:", JSON.stringify({ character_limit: j.character_limit, character_count: j.character_count, remaining: _elevenRemaining }));
         return _elevenRemaining;
     } catch (e) { return null; }
 }
@@ -1301,6 +1302,7 @@ app.post("/generate-question-audio", async (req, res) => {
                 `/rest/v1/tts_usage?created_at=gte.${encodeURIComponent(since)}&select=id`
             );
             if ((globalUsage || []).length >= TTS_GLOBAL_DAILY_LIMIT) {
+                console.warn("[TTS] -> browser voice: cap reached (Daily voice generation limit reached (shared across all users).");
                 return res.status(429).json({ error: "Daily voice generation limit reached (shared across all users)." });
             }
 
@@ -1311,7 +1313,8 @@ app.post("/generate-question-audio", async (req, res) => {
                 );
                 const usedToday = (todaysUsage || []).length;
                 if (usedToday >= TTS_DAILY_LIMIT) {
-                    return res.status(429).json({ error: "Daily voice generation limit reached." });
+                    console.warn("[TTS] -> browser voice: cap reached (Daily voice generation limit reached.");
+                return res.status(429).json({ error: "Daily voice generation limit reached." });
                 }
                 ttsRemainingToday = TTS_DAILY_LIMIT - usedToday - 1; // -1 for the call about to happen
             }
@@ -1324,6 +1327,7 @@ app.post("/generate-question-audio", async (req, res) => {
         const ELEVEN_MIN_CREDITS = parseInt(process.env.ELEVEN_MIN_CREDITS, 10) || 500;
         const elevenRemaining = await getElevenRemainingCredits();
         if (elevenRemaining !== null && elevenRemaining < ELEVEN_MIN_CREDITS) {
+            console.warn("[TTS] -> browser voice: credit guard fired. remaining=", elevenRemaining, "min=", ELEVEN_MIN_CREDITS);
             return res.status(429).json({ error: "Voice credits low — using browser voice." });
         }
 
