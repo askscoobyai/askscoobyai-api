@@ -1273,6 +1273,7 @@ app.post("/generate-question-audio", async (req, res) => {
         }
 
         if (!process.env.ELEVENLABS_API_KEY) {
+            console.warn("[TTS] -> browser voice: ELEVENLABS_API_KEY is NOT set on the server.");
             // Not configured yet — extension falls back to the browser's
             // built-in speech synthesis automatically.
             return res.status(501).json({
