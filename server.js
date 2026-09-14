@@ -66,10 +66,12 @@ async function verifyGoogleUser(req, res, next) {
             `https://www.googleapis.com/oauth2/v2/userinfo?access_token=${encodeURIComponent(token)}`
         );
         if (!googleRes.ok) {
+            console.error("AUTH FAIL: Google rejected token. status=", googleRes.status, await googleRes.text().catch(() => ""));
             return res.status(401).json({ error: "Invalid or expired Google token." });
         }
         const profile = await googleRes.json();
         if (!profile.email) {
+            console.error("AUTH FAIL: Google returned no email. profile=", JSON.stringify(profile));
             return res.status(401).json({ error: "Google token did not return an email." });
         }
         req.googleUser = {
@@ -1675,6 +1677,7 @@ Feedback rules:
 app.post("/auth/sync-user", requireApiToken, verifyGoogleUser, async (req, res) => {
     try {
         const { email, name, given, photo } = req.googleUser;
+        console.log("SYNC-USER hit:", email);
 
         const existing = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(email)}&select=*`);
         if (existing && existing.length > 0) {
