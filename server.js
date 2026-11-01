@@ -194,6 +194,22 @@ function callerLabel(caller) {
 // Signed-in users go through the existing atomic credit function.
 // Anonymous devices go through charge_anon_job, which checks the device
 // allowance AND the rolling IP-hash cap in a single statement.
+// Current credit balance for an account, read straight from the row.
+// Used as a fallback when the charge RPC doesn't hand one back.
+async function readUserCredits(email) {
+    try {
+        const rows = await supabaseFetch(
+            `/rest/v1/users?email=eq.${encodeURIComponent(email)}&select=credits&limit=1`
+        );
+        if (Array.isArray(rows) && rows.length > 0 && typeof rows[0].credits === "number") {
+            return rows[0].credits;
+        }
+    } catch (err) {
+        console.warn("readUserCredits failed (non-fatal):", err.message);
+    }
+    return null;
+}
+
 async function chargeJobUnlock(caller, jobFingerprint) {
     if (caller.mode === "user") {
         // Did THIS DEVICE already unlock THIS job before signing in?
@@ -218,7 +234,12 @@ async function chargeJobUnlock(caller, jobFingerprint) {
                     + `&job_fingerprint=eq.${encodeURIComponent(jobFingerprint)}&select=device_id&limit=1`
                 );
                 if (Array.isArray(prior) && prior.length > 0) {
-                    return { ok: true, alreadyUnlocked: true, reason: "ok" };
+                    return {
+                        ok: true,
+                        alreadyUnlocked: true,
+                        reason: "ok",
+                        credits: await readUserCredits(caller.email)
+                    };
                 }
             } catch (err) {
                 // Never block a generation because this lookup failed —
@@ -232,10 +253,31 @@ async function chargeJobUnlock(caller, jobFingerprint) {
             p_job_fingerprint: jobFingerprint
         });
         const charge = Array.isArray(rows) ? rows[0] : rows;
+        const ok = !!(charge && (charge.charged || charge.already_unlocked));
+
+        // The balance has to come back, and it has to be a NUMBER.
+        //
+        // This object used to carry no credits field at all, so the routes
+        // set parsed.creditsRemaining = undefined, and background.js — which
+        // only acts "if (typeof apiResult.creditsRemaining === 'number')" —
+        // never set creditUsedForCurrentJob. The result: a signed-in user was
+        // asked "You have N credits remaining. Continue?" again for the STAR
+        // answers and again for the cover letter, on a job already paid for.
+        // The topbar credit pill never updated either, for the same reason.
+        // Anonymous callers were unaffected because background.js has its own
+        // branch for them, which is why this only ever showed up signed in.
+        let credits = null;
+        if (charge) {
+            if (typeof charge.credits_remaining === "number") credits = charge.credits_remaining;
+            else if (typeof charge.credits === "number") credits = charge.credits;
+        }
+        if (credits === null && ok) credits = await readUserCredits(caller.email);
+
         return {
-            ok: !!(charge && (charge.charged || charge.already_unlocked)),
+            ok,
             alreadyUnlocked: !!(charge && charge.already_unlocked),
-            reason: "no_credits"
+            reason: "no_credits",
+            credits
         };
     }
 
@@ -2511,11 +2553,12 @@ const SCOOBY_COACH_MIN_SESSIONS = 5;
 app.post("/practice-sessions/free-remaining", requireApiToken, verifyGoogleUser, async (req, res) => {
     try {
         // FREE_PRACTICE_TOTAL and SESSIONS_PER_CREDIT are module-level now.
-        const users = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(req.googleUser.email)}&select=id,practice_session_count`);
+        const users = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(req.googleUser.email)}&select=id,practice_session_count,credits`);
         if (!users || users.length === 0) {
-            return res.json({ success: true, freeSessionsRemaining: FREE_PRACTICE_TOTAL, sessionsRemainingInBlock: null });
+            return res.json({ success: true, freeSessionsRemaining: FREE_PRACTICE_TOTAL, sessionsRemainingInBlock: null, credits: 0 });
         }
         const used = users[0].practice_session_count || 0;
+        const credits = typeof users[0].credits === "number" ? users[0].credits : 0;
         const freeSessionsRemaining = Math.max(0, FREE_PRACTICE_TOTAL - used);
 
         let sessionsRemainingInBlock = null;
@@ -2528,7 +2571,15 @@ app.post("/practice-sessions/free-remaining", requireApiToken, verifyGoogleUser,
             if (sessionsBeyondFree % SESSIONS_PER_CREDIT === 0) sessionsRemainingInBlock = 0;
         }
 
-        res.json({ success: true, freeSessionsRemaining, sessionsRemainingInBlock });
+        // credits MUST be in this response. The extension decides whether to
+        // let someone start a question from it, and without a balance it was
+        // computing "remaining = free + inBlock" and stopping at 0. At a block
+        // boundary both of those are 0 — which means "the next question starts
+        // a new block and costs a credit", NOT "you have nothing left" — so a
+        // user with credits in hand was shown Buy credits and blocked before
+        // the request ever reached this server, which would have charged the
+        // credit and allowed it.
+        res.json({ success: true, freeSessionsRemaining, sessionsRemainingInBlock, credits });
     } catch (err) {
         console.error("free-remaining check error:", err);
         res.status(500).json({ error: "Could not check remaining free sessions." });
