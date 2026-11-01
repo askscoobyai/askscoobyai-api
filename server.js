@@ -1012,7 +1012,7 @@ app.post("/generate-interview", async (req, res) => {
                 return res.status(402).json({
                     error: charge.reason === "ip_cap"
                         ? "The free trial limit for this network has been reached. Please sign in and buy credits to continue."
-                        : "You've used your free job. Sign in and buy credits to prep for more roles.",
+                        : "You've used your free interview prep. Sign in and buy credits to keep going.",
                     noCredits: true,
                     signInRequired: true,
                     reason: charge.reason
@@ -1175,7 +1175,7 @@ app.post("/generate-star", async (req, res) => {
                 return res.status(402).json({
                     error: charge.reason === "ip_cap"
                         ? "The free trial limit for this network has been reached. Please sign in and buy credits to continue."
-                        : "You've used your free job. Sign in and buy credits to prep for more roles.",
+                        : "You've used your free interview prep. Sign in and buy credits to keep going.",
                     noCredits: true,
                     signInRequired: true,
                     reason: charge.reason
@@ -1332,7 +1332,7 @@ app.post("/generate-docs", async (req, res) => {
                 return res.status(402).json({
                     error: charge.reason === "ip_cap"
                         ? "The free trial limit for this network has been reached. Please sign in and buy credits to continue."
-                        : "You've used your free job. Sign in and buy credits to prep for more roles.",
+                        : "You've used your free interview prep. Sign in and buy credits to keep going.",
                     noCredits: true,
                     signInRequired: true,
                     reason: charge.reason
