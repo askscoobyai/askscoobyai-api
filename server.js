@@ -196,6 +196,37 @@ function callerLabel(caller) {
 // allowance AND the rolling IP-hash cap in a single statement.
 async function chargeJobUnlock(caller, jobFingerprint) {
     if (caller.mode === "user") {
+        // Did THIS DEVICE already unlock THIS job before signing in?
+        //
+        // Someone preps a job on the free trial, generates Interview Q&A,
+        // likes it, signs in — and then STAR and the cover letter are
+        // refused, because the signed-in path only looks at the account's
+        // own unlocks and a brand-new account has none and no credits.
+        // Signing in took away access they already had, at the worst
+        // possible moment.
+        //
+        // claim_anon_device moves practice history across but not the job
+        // unlock, and rather than copy rows between two tables at sign-in
+        // we just check the anonymous table here too. The device id is sent
+        // on every request, signed in or not, so it is always available.
+        // Honouring it costs nothing: that job was already paid for with
+        // the free prep, and the fingerprint has to match exactly.
+        if (caller.deviceId) {
+            try {
+                const prior = await supabaseFetch(
+                    `/rest/v1/anon_job_unlocks?device_id=eq.${encodeURIComponent(caller.deviceId)}`
+                    + `&job_fingerprint=eq.${encodeURIComponent(jobFingerprint)}&select=device_id&limit=1`
+                );
+                if (Array.isArray(prior) && prior.length > 0) {
+                    return { ok: true, alreadyUnlocked: true, reason: "ok" };
+                }
+            } catch (err) {
+                // Never block a generation because this lookup failed —
+                // fall through to the normal credit charge.
+                console.warn("anon unlock carry-over check failed (non-fatal):", err.message);
+            }
+        }
+
         const rows = await supabaseRpc("charge_credit_for_job", {
             p_email: caller.email,
             p_job_fingerprint: jobFingerprint
