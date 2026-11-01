@@ -113,6 +113,20 @@ const ANON_IP_JOB_CAP = 3;           // job unlocks per IP hash per rolling 30 d
 const ANON_IP_PRACTICE_CAP = 9;      // practice sessions per IP hash per rolling 30 days
 const ANON_IP_WINDOW_DAYS = 30;
 
+// ── Account allowances ──
+// FREE_PRACTICE_TOTAL deliberately MATCHES ANON_FREE_PRACTICE. The free
+// trial is the same size whether or not someone signs in, and sessions
+// used anonymously are carried onto the account by claim_anon_device, so
+// it is 3 in total rather than 3 and then 3 more. Signing in changes no
+// number — what it buys is a saved board, history and the ability to buy
+// credits. These were 3 and 10, which forced the UI to explain itself
+// ("3 left · 7 more when you sign in") and confused everyone, including us.
+//
+// Both of these used to be declared separately inside two route handlers.
+// They live here now so the two can never drift apart again.
+const FREE_PRACTICE_TOTAL = ANON_FREE_PRACTICE;  // free practice sessions per account
+const SESSIONS_PER_CREDIT = 5;                   // practice sessions unlocked by 1 credit
+
 // Salt must be set in Render env. Without it we refuse anonymous use
 // rather than storing weakly-hashed addresses.
 const IP_HASH_SALT = process.env.IP_HASH_SALT || "";
@@ -1607,8 +1621,7 @@ app.post("/generate-practice-feedback", async (req, res) => {
         // than as separate count/decide/charge steps, which previously left
         // a small window where near-simultaneous requests could both read
         // "still free" before either had recorded its own count.
-        const FREE_PRACTICE_TOTAL = 10;
-        const SESSIONS_PER_CREDIT = 5;
+        // FREE_PRACTICE_TOTAL and SESSIONS_PER_CREDIT are module-level now.
         const jobFingerprint = getJobFingerprint(trimmedJD, safeCompany);
         let creditCharged = false;
         let creditsRemainingAfterCharge = null;
@@ -2466,8 +2479,7 @@ const SCOOBY_COACH_MIN_SESSIONS = 5;
 // if one exists. Viewing/revisiting never costs a credit.
 app.post("/practice-sessions/free-remaining", requireApiToken, verifyGoogleUser, async (req, res) => {
     try {
-        const FREE_PRACTICE_TOTAL = 10;
-        const SESSIONS_PER_CREDIT = 5;
+        // FREE_PRACTICE_TOTAL and SESSIONS_PER_CREDIT are module-level now.
         const users = await supabaseFetch(`/rest/v1/users?email=eq.${encodeURIComponent(req.googleUser.email)}&select=id,practice_session_count`);
         if (!users || users.length === 0) {
             return res.json({ success: true, freeSessionsRemaining: FREE_PRACTICE_TOTAL, sessionsRemainingInBlock: null });
